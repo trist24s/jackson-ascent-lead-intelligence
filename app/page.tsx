@@ -24,10 +24,25 @@ export default function Home() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [debug, setDebug] = useState("");
 
   async function loadProspects() {
-    const res = await fetch("/api/prospects");
-    if (res.ok) setProspects(await res.json());
+    try {
+      const res = await fetch("/api/prospects", { cache: "no-store" });
+      const body = await res.json();
+      if (!res.ok) {
+        console.error("[prospects] load error", body);
+        setDebug(`Load error: ${body?.error || res.status}`);
+        return;
+      }
+      const rows: Prospect[] = Array.isArray(body) ? body : [];
+      setProspects(rows);
+      setDebug(`Raw rows returned from API: ${rows.length}`);
+      console.log("[prospects] loaded", rows.length);
+    } catch (e: any) {
+      console.error("[prospects] load failed", e);
+      setDebug(`Load failed: ${e.message}`);
+    }
   }
 
   useEffect(() => {
@@ -110,7 +125,8 @@ export default function Home() {
         <button disabled={busy} className="bg-blue-700 text-white rounded px-4 py-2 disabled:opacity-50">{busy ? "Working…" : "Scrape leads"}</button>
       </form>
 
-      {status && <p className="mb-4 text-sm text-gray-700">{status}</p>}
+      {status && <p className="mb-2 text-sm text-gray-700">{status}</p>}
+      {debug && <p className="mb-4 text-xs text-gray-400">[debug] {debug}</p>}
 
       <div className="flex items-center justify-between mb-2">
         <h2 className="font-semibold">Prospects ({prospects.length})</h2>
