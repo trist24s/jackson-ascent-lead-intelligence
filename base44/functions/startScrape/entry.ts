@@ -6,7 +6,14 @@ Deno.serve(async (req) => {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { niche, city, max_results = 50 } = await req.json();
+    const body = await req.json();
+    // Jackson Ascent V1 defaults to roofing. `industry` is the canonical vertical;
+    // `niche` is the literal Google Maps search term (defaults to the industry).
+    const industry = (body.industry || body.niche || 'roofing').toString();
+    const niche = (body.niche || industry).toString();
+    const city = body.city;
+    const max_results = body.max_results ?? 50;
+
     if (!niche || !city) {
       return Response.json({ error: 'niche and city required' }, { status: 400 });
     }
@@ -20,11 +27,13 @@ Deno.serve(async (req) => {
 
     const scrapeRun = await base44.entities.ScrapeRun.create({
       run_id: 'pending',
+      industry,
       niche,
       city,
       max_results: cap,
       status: 'running',
       inserted: 0,
+      updated: 0,
       skipped: 0,
       error_message: '',
       started_at: new Date().toISOString(),

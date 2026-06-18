@@ -6,9 +6,14 @@
       "type": "string",
       "title": "Apify Run ID"
     },
+    "industry": {
+      "type": "string",
+      "title": "Industry",
+      "default": "roofing"
+    },
     "niche": {
       "type": "string",
-      "title": "Niche"
+      "title": "Niche / Search Term"
     },
     "city": {
       "type": "string",
@@ -31,6 +36,11 @@
     "inserted": {
       "type": "number",
       "title": "Leads Inserted",
+      "default": 0
+    },
+    "updated": {
+      "type": "number",
+      "title": "Leads Updated",
       "default": 0
     },
     "skipped": {
