@@ -7,6 +7,11 @@ export const maxDuration = 60;
 
 const MIN_CONFIDENCE = 70;
 
+type SampleRow = {
+  name: string; category: string | null; city: string | null; state: string | null;
+  website: boolean; phone: string | null; confidence: number | null; action: string; reason: string;
+};
+
 export async function POST(req: Request) {
   try {
     const { scrape_run_id } = await req.json();
@@ -17,7 +22,7 @@ export async function POST(req: Request) {
     if (!run) return NextResponse.json({ error: "ScrapeRun not found" }, { status: 404 });
 
     if (run.status === "complete" || run.status === "failed") {
-      return NextResponse.json({ status: run.status, returned: run.returned ?? null, inserted: run.inserted, updated: run.updated, skipped: run.skipped, error_message: run.error_message });
+      return NextResponse.json({ status: run.status, city: run.city, inserted: run.inserted, updated: run.updated, skipped: run.skipped, error_message: run.error_message });
     }
     if (!run.run_id || run.run_id === "pending") return NextResponse.json({ status: "running" });
 
@@ -57,37 +62,56 @@ export async function POST(req: Request) {
     const items = await dsRes.json();
     const capped = (Array.isArray(items) ? items : []).slice(0, run.max_results || 50);
     const returned = capped.length;
-    console.log("[scrape/check] city:", run.city, "dataset items returned:", Array.isArray(items) ? items.length : 0, "processing:", returned);
 
+    let qualified = 0;
+    let rejected = 0;
     let inserted = 0;
     let updated = 0;
-    let skipped = 0;
-    const errors: string[] = [];
+    let errorCount = 0;
+    let firstError = "";
+    const sample: SampleRow[] = [];
 
     for (const item of capped) {
-      if (!item.placeId || !item.title) { skipped++; continue; }
+      const category = item.categoryName ?? (Array.isArray(item.categories) ? item.categories[0] : null) ?? null;
+      const base = { name: item.title || "(no name)", category, city: item.city ?? null, state: item.state ?? null, website: !!item.website, phone: item.phone ?? null };
+
+      if (!item.placeId || !item.title) {
+        rejected++;
+        sample.push({ ...base, confidence: null, action: "rejected", reason: "Missing place_id or title" });
+        continue;
+      }
       const fields = mapItem(item, run);
-      if ((fields.roofing_confidence ?? 0) < MIN_CONFIDENCE) { skipped++; continue; }
+      const conf = fields.roofing_confidence ?? 0;
+      if (conf < MIN_CONFIDENCE) {
+        rejected++;
+        sample.push({ ...base, confidence: conf, action: "rejected", reason: `Low roofing confidence (${conf}%) for category "${fields.category || "unknown"}"` });
+        continue;
+      }
+      qualified++;
 
       const { data: existing } = await supabase.from("prospects").select("id").eq("place_id", item.placeId).maybeSingle();
       if (existing) {
         const { error } = await supabase.from("prospects").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", existing.id);
-        if (error) { console.error("[scrape/check] update error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
-        else updated++;
+        if (error) { errorCount++; firstError = firstError || error.message; console.error("[scrape/check] update error:", JSON.stringify(error)); sample.push({ ...base, confidence: conf, action: "error", reason: `DB error: ${error.message}` }); }
+        else { updated++; sample.push({ ...base, confidence: conf, action: "updated", reason: "Updated existing" }); }
       } else {
         const { error } = await supabase.from("prospects").insert(fields);
-        if (error) { console.error("[scrape/check] insert error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
-        else inserted++;
+        if (error) { errorCount++; firstError = firstError || error.message; console.error("[scrape/check] insert error:", JSON.stringify(error)); sample.push({ ...base, confidence: conf, action: "error", reason: `DB error: ${error.message}` }); }
+        else { inserted++; sample.push({ ...base, confidence: conf, action: "inserted", reason: "Inserted" }); }
       }
     }
 
+    const errorSummary = errorCount ? `${errorCount} DB errors. First: ${firstError}` : "";
     await supabase.from("scrape_runs").update({
-      status: "complete", inserted, updated, skipped,
-      error_message: errors.join(" | ").slice(0, 500), completed_at: new Date().toISOString(),
+      status: "complete", inserted, updated, skipped: rejected,
+      error_message: errorSummary.slice(0, 500), completed_at: new Date().toISOString(),
     }).eq("id", run.id);
 
-    console.log("[scrape/check] complete", JSON.stringify({ city: run.city, returned, inserted, updated, skipped }));
-    return NextResponse.json({ status: "complete", returned, inserted, updated, skipped });
+    console.log("[scrape/check] complete", JSON.stringify({ city: run.city, returned, qualified, rejected, inserted, updated, errors: errorCount, firstError }));
+    return NextResponse.json({
+      status: "complete", city: run.city, returned, qualified, rejected, inserted, updated,
+      errors: errorCount, error_sample: firstError, sample: sample.slice(0, 40),
+    });
   } catch (err: any) {
     console.error("[scrape/check] fatal:", err?.message, err?.stack);
     return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
