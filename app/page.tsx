@@ -45,6 +45,7 @@ export default function Home() {
         body: JSON.stringify({ industry, niche: industry, city, max_results: maxResults }),
       });
       const run = await startRes.json();
+      console.log("[scrape] start response", startRes.status, run);
       if (!startRes.ok) {
         setStatus(`Error: ${run.error || "failed to start"}`);
         setBusy(false);
@@ -60,6 +61,7 @@ export default function Home() {
           body: JSON.stringify({ scrape_run_id: run.id }),
         });
         const data = await checkRes.json();
+        console.log("[scrape] check response", checkRes.status, data);
         if (data.status === "running") {
           setStatus("Scraping… this usually takes 30–90 seconds.");
           continue;
@@ -67,12 +69,13 @@ export default function Home() {
         if (data.status === "complete") {
           setStatus(`Done — ${data.inserted} new, ${data.updated} updated, ${data.skipped} skipped.`);
         } else {
-          setStatus(`Scrape ${data.status}: ${data.error_message || ""}`);
+          setStatus(`Scrape ${data.status || "error"}: ${data.error_message || data.error || ""}`);
         }
         done = true;
       }
       await loadProspects();
     } catch (err: any) {
+      console.error("[scrape] fatal", err);
       setStatus(`Error: ${err.message}`);
     } finally {
       setBusy(false);
@@ -102,7 +105,7 @@ export default function Home() {
 
       <form onSubmit={runScrape} className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-6">
         <input className="border rounded px-3 py-2" value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="Industry (e.g. roofing)" />
-        <input className="border rounded px-3 py-2" value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (e.g. Dallas, TX)" required />
+        <input className="border rounded px-3 py-2" value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (e.g. Harrisburg, PA)" required />
         <input className="border rounded px-3 py-2" type="number" min={1} max={500} value={maxResults} onChange={(e) => setMaxResults(Number(e.target.value))} placeholder="Max results" />
         <button disabled={busy} className="bg-blue-700 text-white rounded px-4 py-2 disabled:opacity-50">{busy ? "Working…" : "Scrape leads"}</button>
       </form>

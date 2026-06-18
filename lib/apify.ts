@@ -1,13 +1,39 @@
 // Apify Google Maps Places scraper helpers.
-// Ported from the original Base44 Deno backend functions.
+// Ported from the original Base44 Deno backend functions, hardened for production.
 
 const APIFY_BASE = "https://api.apify.com/v2";
-const ACTOR = "compass~crawler-google-places";
+// Verified live via GET /v2/acts/compass~crawler-google-places ->
+// id nwua9Gu5YrADL7ZDj, username "compass", name "crawler-google-places", public.
+export const ACTOR_ID = "compass~crawler-google-places";
 
 export function apifyToken(): string {
   const t = process.env.APIFY_API_TOKEN;
-  if (!t) throw new Error("Missing APIFY_API_TOKEN");
-  return t;
+  if (!t || !t.trim()) throw new Error("Missing APIFY_API_TOKEN environment variable");
+  // Trim to defend against trailing spaces/newlines from pasting into Vercel.
+  return t.trim();
+}
+
+function authHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apifyToken()}`,
+  };
+}
+
+export function buildRunInput(niche: string, city: string, cap: number) {
+  return {
+    searchStringsArray: [niche],
+    locationQuery: city,
+    maxCrawledPlaces: cap,
+    maxCrawledPlacesPerSearch: cap,
+    language: "en",
+    includeHistogram: false,
+    includeOpeningHours: false,
+    includePeopleAlsoSearch: false,
+    maxReviews: 0,
+    maxImages: 0,
+    maxQuestions: 0,
+  };
 }
 
 export async function startApifyRun(opts: {
@@ -15,36 +41,38 @@ export async function startApifyRun(opts: {
   city: string;
   cap: number;
 }): Promise<Response> {
-  const token = apifyToken();
-  return fetch(`${APIFY_BASE}/acts/${ACTOR}/runs?token=${token}`, {
+  const url = `${APIFY_BASE}/acts/${ACTOR_ID}/runs`;
+  const input = buildRunInput(opts.niche, opts.city, opts.cap);
+  console.log("[apify] startApifyRun ->", JSON.stringify({ actorId: ACTOR_ID, url, input }));
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      searchStringsArray: [opts.niche],
-      locationQuery: opts.city,
-      maxCrawledPlaces: opts.cap,
-      maxCrawledPlacesPerSearch: opts.cap,
-      language: "en",
-      includeHistogram: false,
-      includeOpeningHours: false,
-      includePeopleAlsoSearch: false,
-      maxReviews: 0,
-      maxImages: 0,
-      maxQuestions: 0,
-    }),
+    headers: authHeaders(),
+    body: JSON.stringify(input),
   });
+  console.log("[apify] startApifyRun response status:", res.status);
+  return res;
 }
 
 export async function getApifyRun(runId: string): Promise<Response> {
-  const token = apifyToken();
-  return fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`);
+  if (!runId || !runId.trim() || runId === "pending") {
+    throw new Error(`getApifyRun called with invalid runId: "${runId}"`);
+  }
+  const url = `${APIFY_BASE}/actor-runs/${runId}`;
+  console.log("[apify] getApifyRun ->", url);
+  const res = await fetch(url, { headers: authHeaders() });
+  console.log("[apify] getApifyRun response status:", res.status);
+  return res;
 }
 
 export async function getApifyDataset(datasetId: string): Promise<Response> {
-  const token = apifyToken();
-  return fetch(
-    `${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&clean=true&format=json`
-  );
+  if (!datasetId || !datasetId.trim()) {
+    throw new Error(`getApifyDataset called with invalid datasetId: "${datasetId}"`);
+  }
+  const url = `${APIFY_BASE}/datasets/${datasetId}/items?clean=true&format=json`;
+  console.log("[apify] getApifyDataset ->", url);
+  const res = await fetch(url, { headers: authHeaders() });
+  console.log("[apify] getApifyDataset response status:", res.status);
+  return res;
 }
 
 type RunContext = {
