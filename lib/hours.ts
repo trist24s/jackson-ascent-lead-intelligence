@@ -37,10 +37,7 @@ export function normalizeHours(hours: OpeningHour[] | null | undefined): Record<
   return out;
 }
 
-export function openStatus(
-  hours: OpeningHour[] | null | undefined,
-  now: Date = new Date()
-): "open" | "closed" | "closing_soon" | "unknown" {
+export function openStatus(hours: OpeningHour[] | null | undefined, now: Date = new Date()): "open" | "closed" | "closing_soon" | "unknown" {
   const norm = normalizeHours(hours);
   if (Object.keys(norm).length === 0) return "unknown";
   const range = norm[DAYS[now.getDay()]];
@@ -66,12 +63,67 @@ function fmt(mins: number): string {
   return `${hh}:${m.toString().padStart(2, "0")} ${ap}`;
 }
 
-export function bestTimeToCall(
-  hours: OpeningHour[] | null | undefined,
-  now: Date = new Date()
-): string {
+export function bestTimeToCall(hours: OpeningHour[] | null | undefined, now: Date = new Date()): string {
+  return callWindow(hours, now).window;
+}
+
+// V3: open_now / closes_at / opens_next intelligence.
+export function hoursIntel(hours: OpeningHour[] | null | undefined, now: Date = new Date()): {
+  openNow: boolean;
+  status: "open" | "closed" | "closing_soon" | "unknown";
+  closesAt: string | null;
+  opensNext: string | null;
+} {
   const norm = normalizeHours(hours);
-  if (Object.keys(norm).length === 0) return "Best time unavailable";
+  const status = openStatus(hours, now);
+  const mins = now.getHours() * 60 + now.getMinutes();
+  let closesAt: string | null = null;
+  const today = norm[DAYS[now.getDay()]];
+  if (today && today !== "closed" && today !== "24h") closesAt = fmt(today.close);
+
+  let opensNext: string | null = null;
+  for (let i = 0; i < 8; i++) {
+    const d = (now.getDay() + i) % 7;
+    const range = norm[DAYS[d]];
+    if (!range || range === "closed") continue;
+    const openMin = range === "24h" ? 0 : range.open;
+    if (i === 0) {
+      if (mins < openMin) { opensNext = `Today ${fmt(openMin)}`; break; }
+      continue;
+    }
+    const label = i === 1 ? "Tomorrow" : DAYS[d];
+    opensNext = `${label} ${fmt(openMin)}`;
+    break;
+  }
+  return { openNow: status === "open" || status === "closing_soon", status, closesAt, opensNext };
+}
+
+const LUNCH_START = 12 * 60;
+const LUNCH_END = 13 * 60;
+
+function pickCallSlot(open: number, close: number): [number, number] | null {
+  const earliest = open + 30; // avoid first 30 min after opening
+  const latest = close - 60;  // avoid last hour before closing
+  const prefs: [number, number][] = [[9 * 60, 11 * 60], [14 * 60, 16 * 60]];
+  for (const [ps, pe] of prefs) {
+    let s = Math.max(ps, earliest);
+    let e = Math.min(pe, latest);
+    if (s >= LUNCH_START && s < LUNCH_END) s = LUNCH_END;
+    if (e > LUNCH_START && e <= LUNCH_END) e = LUNCH_START;
+    if (e - s >= 60) return [s, Math.min(s + 90, e)];
+  }
+  let s = Math.max(earliest, 10 * 60);
+  if (s >= LUNCH_START && s < LUNCH_END) s = LUNCH_END;
+  const e = Math.min(s + 90, latest);
+  if (e - s >= 60) return [s, e];
+  return null;
+}
+
+// V3: best cold-call window with reason.
+export function callWindow(hours: OpeningHour[] | null | undefined, now: Date = new Date()): { window: string; reason: string } {
+  const norm = normalizeHours(hours);
+  const reason = "Owner is likely available — past the morning rush, before lunch or end-of-day wind-down.";
+  if (Object.keys(norm).length === 0) return { window: "Best window unavailable", reason: "" };
   for (let i = 0; i < 7; i++) {
     const d = (now.getDay() + i) % 7;
     const range = norm[DAYS[d]];
@@ -79,14 +131,13 @@ export function bestTimeToCall(
     let open = 8 * 60;
     let close = 17 * 60;
     if (range !== "24h") { open = range.open; close = range.close; }
-    let start = Math.max(open + 60, 10 * 60); // mid-morning, after they settle in
-    if (start + 90 > close) start = Math.max(open, close - 120);
-    const end = Math.min(start + 90, close);
+    const slot = pickCallSlot(open, close);
+    if (!slot) continue;
     if (i === 0) {
       const mins = now.getHours() * 60 + now.getMinutes();
-      if (mins > start) continue; // ideal window already passed today
+      if (mins > slot[0]) continue;
     }
-    return `${DAYS[d]} ${fmt(start)} - ${fmt(end)}`;
+    return { window: `${DAYS[d]} ${fmt(slot[0])} - ${fmt(slot[1])}`, reason };
   }
-  return "Best time unavailable";
+  return { window: "Best window unavailable", reason: "" };
 }
