@@ -1,36 +1,26 @@
 import { NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
-import { getApifyRun, getApifyDataset, mapItem, isRelevant } from "@/lib/apify";
+import { getApifyRun, getApifyDataset, mapItem } from "@/lib/apify";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// V3: only import businesses we're confident are roofing/exterior contractors.
+const MIN_CONFIDENCE = 70;
+
 export async function POST(req: Request) {
   try {
     const { scrape_run_id } = await req.json();
-    if (!scrape_run_id) {
-      return NextResponse.json({ error: "scrape_run_id required" }, { status: 400 });
-    }
+    if (!scrape_run_id) return NextResponse.json({ error: "scrape_run_id required" }, { status: 400 });
 
     const supabase = getServiceClient();
     const { data: run } = await supabase.from("scrape_runs").select("*").eq("id", scrape_run_id).single();
-    if (!run) {
-      return NextResponse.json({ error: "ScrapeRun not found" }, { status: 404 });
-    }
+    if (!run) return NextResponse.json({ error: "ScrapeRun not found" }, { status: 404 });
 
     if (run.status === "complete" || run.status === "failed") {
-      return NextResponse.json({
-        status: run.status,
-        inserted: run.inserted,
-        updated: run.updated,
-        skipped: run.skipped,
-        error_message: run.error_message,
-      });
+      return NextResponse.json({ status: run.status, inserted: run.inserted, updated: run.updated, skipped: run.skipped, error_message: run.error_message });
     }
-
-    if (!run.run_id || run.run_id === "pending") {
-      return NextResponse.json({ status: "running" });
-    }
+    if (!run.run_id || run.run_id === "pending") return NextResponse.json({ status: "running" });
 
     const runRes = await getApifyRun(run.run_id);
     if (!runRes.ok) {
@@ -42,9 +32,7 @@ export async function POST(req: Request) {
     const apifyStatus = runData?.data?.status;
     console.log("[scrape/check] Apify run status:", apifyStatus, "run:", run.run_id);
 
-    if (!apifyStatus || apifyStatus === "RUNNING" || apifyStatus === "READY") {
-      return NextResponse.json({ status: "running" });
-    }
+    if (!apifyStatus || apifyStatus === "RUNNING" || apifyStatus === "READY") return NextResponse.json({ status: "running" });
 
     if (apifyStatus !== "SUCCEEDED") {
       const msg = `Apify run status: ${apifyStatus}`;
@@ -55,7 +43,6 @@ export async function POST(req: Request) {
     const datasetId = runData?.data?.defaultDatasetId;
     if (!datasetId) {
       const msg = "Apify run succeeded but returned no defaultDatasetId";
-      console.error("[scrape/check]", msg, JSON.stringify(runData?.data || {}));
       await supabase.from("scrape_runs").update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() }).eq("id", run.id);
       return NextResponse.json({ status: "failed", error_message: msg });
     }
@@ -64,7 +51,6 @@ export async function POST(req: Request) {
     if (!dsRes.ok) {
       const b = await dsRes.text();
       const msg = `Dataset fetch failed (${dsRes.status}): ${b.slice(0, 200)}`;
-      console.error("[scrape/check]", msg);
       await supabase.from("scrape_runs").update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() }).eq("id", run.id);
       return NextResponse.json({ status: "failed", error_message: msg });
     }
@@ -73,7 +59,6 @@ export async function POST(req: Request) {
     const capped = (Array.isArray(items) ? items : []).slice(0, run.max_results || 50);
     console.log("[scrape/check] dataset items:", Array.isArray(items) ? items.length : 0);
 
-    const industry = run.niche || run.industry || "roofing";
     let inserted = 0;
     let updated = 0;
     let skipped = 0;
@@ -81,30 +66,25 @@ export async function POST(req: Request) {
 
     for (const item of capped) {
       if (!item.placeId || !item.title) { skipped++; continue; }
-      // V2 FEATURE 7: skip clearly-irrelevant businesses (hardware stores, auto repair, etc.).
-      if (!isRelevant(item, industry)) { skipped++; continue; }
-
       const fields = mapItem(item, run);
-      const { data: existing } = await supabase.from("prospects").select("id").eq("place_id", item.placeId).maybeSingle();
+      // V3 FEATURE 1: skip low-confidence (non-roofing) businesses.
+      if ((fields.roofing_confidence ?? 0) < MIN_CONFIDENCE) { skipped++; continue; }
 
+      const { data: existing } = await supabase.from("prospects").select("id").eq("place_id", item.placeId).maybeSingle();
       if (existing) {
         const { error } = await supabase.from("prospects").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", existing.id);
-        if (error) { console.error("[scrape/check] prospects update error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
+        if (error) { console.error("[scrape/check] update error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
         else updated++;
       } else {
         const { error } = await supabase.from("prospects").insert(fields);
-        if (error) { console.error("[scrape/check] prospects insert error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
+        if (error) { console.error("[scrape/check] insert error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
         else inserted++;
       }
     }
 
     await supabase.from("scrape_runs").update({
-      status: "complete",
-      inserted,
-      updated,
-      skipped,
-      error_message: errors.join(" | ").slice(0, 500),
-      completed_at: new Date().toISOString(),
+      status: "complete", inserted, updated, skipped,
+      error_message: errors.join(" | ").slice(0, 500), completed_at: new Date().toISOString(),
     }).eq("id", run.id);
 
     console.log("[scrape/check] complete", JSON.stringify({ inserted, updated, skipped }));
