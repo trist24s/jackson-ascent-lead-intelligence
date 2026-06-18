@@ -32,36 +32,61 @@ export async function POST(req: Request) {
       });
     }
 
+    // run_id not set yet (start hasn't finished or failed) -> tell client to keep waiting.
+    if (!run.run_id || run.run_id === "pending") {
+      return NextResponse.json({ status: "running" });
+    }
+
     const runRes = await getApifyRun(run.run_id);
-    if (!runRes.ok) return NextResponse.json({ status: "running" });
+    if (!runRes.ok) {
+      const b = await runRes.text();
+      console.error("[scrape/check] getApifyRun not ok", JSON.stringify({ status: runRes.status, body: b.slice(0, 200) }));
+      // Transient poll error — keep waiting rather than failing the whole run.
+      return NextResponse.json({ status: "running" });
+    }
     const runData = await runRes.json();
     const apifyStatus = runData?.data?.status;
+    console.log("[scrape/check] Apify run status:", apifyStatus, "run:", run.run_id);
 
     if (!apifyStatus || apifyStatus === "RUNNING" || apifyStatus === "READY") {
       return NextResponse.json({ status: "running" });
     }
 
     if (apifyStatus !== "SUCCEEDED") {
+      const msg = `Apify run status: ${apifyStatus}`;
       await supabase
         .from("scrape_runs")
-        .update({ status: "failed", error_message: `Apify run status: ${apifyStatus}`, completed_at: new Date().toISOString() })
+        .update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() })
         .eq("id", run.id);
-      return NextResponse.json({ status: "failed", error_message: `Apify run status: ${apifyStatus}` });
+      return NextResponse.json({ status: "failed", error_message: msg });
     }
 
     const datasetId = runData?.data?.defaultDatasetId;
+    if (!datasetId) {
+      const msg = "Apify run succeeded but returned no defaultDatasetId";
+      console.error("[scrape/check]", msg, JSON.stringify(runData?.data || {}));
+      await supabase
+        .from("scrape_runs")
+        .update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() })
+        .eq("id", run.id);
+      return NextResponse.json({ status: "failed", error_message: msg });
+    }
+
     const dsRes = await getApifyDataset(datasetId);
     if (!dsRes.ok) {
       const b = await dsRes.text();
+      const msg = `Dataset fetch failed (${dsRes.status}): ${b.slice(0, 200)}`;
+      console.error("[scrape/check]", msg);
       await supabase
         .from("scrape_runs")
-        .update({ status: "failed", error_message: `Dataset fetch failed: ${dsRes.status} ${b.slice(0, 200)}`, completed_at: new Date().toISOString() })
+        .update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() })
         .eq("id", run.id);
-      return NextResponse.json({ status: "failed" });
+      return NextResponse.json({ status: "failed", error_message: msg });
     }
 
     const items = await dsRes.json();
     const capped = (Array.isArray(items) ? items : []).slice(0, run.max_results || 50);
+    console.log("[scrape/check] dataset items:", Array.isArray(items) ? items.length : 0);
 
     let inserted = 0;
     let updated = 0;
@@ -107,8 +132,10 @@ export async function POST(req: Request) {
       })
       .eq("id", run.id);
 
+    console.log("[scrape/check] complete", JSON.stringify({ inserted, updated, skipped }));
     return NextResponse.json({ status: "complete", inserted, updated, skipped });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("[scrape/check] fatal:", err?.message, err?.stack);
+    return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
   }
 }
