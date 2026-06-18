@@ -21,7 +21,12 @@ type Prospect = {
   scrape_run_id: string | null;
 };
 type Note = { id: string; prospect_id: string; body: string; created_at: string };
-type LastSearch = { city: string; returned: number; inserted: number; updated: number; skipped: number; runId: string };
+type Debug = {
+  city?: string; returned?: number; qualified?: number; rejected?: number; inserted?: number; updated?: number;
+  errors?: number; error_sample?: string;
+  sample?: { name: string; category: string | null; city: string | null; state: string | null; website: boolean; phone: string | null; confidence: number | null; action: string; reason: string }[];
+};
+type LastSearch = { city: string; returned: number; inserted: number; updated: number; rejected: number; runId: string };
 
 const SCORE_CLASS: Record<string, string> = { green: "bg-green-100 text-green-800", yellow: "bg-yellow-100 text-yellow-800", red: "bg-red-100 text-red-700" };
 const STATUS_LABEL: Record<string, string> = { open: "🟢 Open Now", closed: "🔴 Closed", closing_soon: "🟡 Closing Soon", unknown: "—" };
@@ -39,6 +44,7 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<"current" | "database">("database");
   const [cityFilter, setCityFilter] = useState("All Cities");
   const [lastSearch, setLastSearch] = useState<LastSearch | null>(null);
+  const [debug, setDebug] = useState<Debug | null>(null);
 
   async function loadProspects() {
     try {
@@ -70,7 +76,6 @@ export default function Home() {
     [prospects]
   );
 
-  // City-scoped view: most-recent scrape only, or the whole database (optionally one city).
   const visible = useMemo(() => {
     if (viewMode === "current") {
       if (!lastSearch?.runId) return [];
@@ -95,7 +100,7 @@ export default function Home() {
   }, [visible]);
 
   async function runScrape(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true); setStatus(`Starting scrape for ${city}…`);
+    e.preventDefault(); setBusy(true); setStatus(`Starting scrape for ${city}…`); setDebug(null);
     console.log("[scrape] city submitted:", city, "industry:", industry, "max:", maxResults);
     try {
       const startRes = await fetch("/api/scrape/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ industry, niche: industry, city, max_results: maxResults }) });
@@ -108,8 +113,9 @@ export default function Home() {
         const data = await checkRes.json();
         if (data.status === "running") { setStatus(`Scraping ${city}… this usually takes 30–90 seconds.`); continue; }
         if (data.status === "complete") {
-          setStatus(`Done with ${city} — ${data.returned ?? "?"} returned, ${data.inserted} new, ${data.updated} updated, ${data.skipped} skipped.`);
-          setLastSearch({ city, returned: data.returned ?? 0, inserted: data.inserted ?? 0, updated: data.updated ?? 0, skipped: data.skipped ?? 0, runId: run.id });
+          setDebug(data);
+          setStatus(`Done with ${city} — ${data.returned} returned, ${data.qualified} qualified, ${data.inserted} new, ${data.updated} updated, ${data.errors || 0} DB errors.`);
+          setLastSearch({ city, returned: data.returned ?? 0, inserted: data.inserted ?? 0, updated: data.updated ?? 0, rejected: data.rejected ?? 0, runId: run.id });
           setViewMode("current");
         } else setStatus(`Scrape ${data.status || "error"}: ${data.error_message || data.error || ""}`);
         done = true;
@@ -185,32 +191,55 @@ export default function Home() {
 
       <form onSubmit={runScrape} className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
         <input className="border rounded px-3 py-2" value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="Industry (e.g. roofing)" />
-        <input className="border rounded px-3 py-2" value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (e.g. Houston, TX)" required />
+        <input className="border rounded px-3 py-2" value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (e.g. Miami, FL)" required />
         <input className="border rounded px-3 py-2" type="number" min={1} max={500} value={maxResults} onChange={(e) => setMaxResults(Number(e.target.value))} placeholder="Max results" />
         <button disabled={busy} className="bg-blue-700 text-white rounded px-4 py-2 disabled:opacity-50">{busy ? "Working…" : "Scrape leads"}</button>
       </form>
       {status && <p className="mb-3 text-sm text-gray-700">{status}</p>}
 
+      {/* Pipeline trace (debug) */}
+      {debug && (
+        <div className="mb-4 border rounded-lg p-3 bg-yellow-50 text-sm">
+          <div className="font-semibold mb-1">Pipeline Trace — {debug.city}</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <span>Apify Returned: <b>{debug.returned}</b></span>
+            <span>Qualified: <b>{debug.qualified}</b></span>
+            <span>Rejected: <b>{debug.rejected}</b></span>
+            <span>Inserted: <b>{debug.inserted}</b></span>
+            <span>Updated: <b>{debug.updated}</b></span>
+            <span className={debug.errors ? "text-red-600 font-semibold" : ""}>DB Errors: <b>{debug.errors || 0}</b></span>
+          </div>
+          {debug.error_sample && <div className="mt-1 text-red-600">First DB error: {debug.error_sample}</div>}
+          {debug.sample && debug.sample.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-gray-700">Raw Apify results ({debug.sample.length})</summary>
+              <div className="overflow-x-auto mt-2">
+                <table className="w-full text-xs">
+                  <thead className="text-left text-gray-500"><tr><th className="pr-2 py-1">Name</th><th className="pr-2">Category</th><th className="pr-2">City</th><th className="pr-2">State</th><th className="pr-2">Web</th><th className="pr-2">Phone</th><th className="pr-2">Conf</th><th className="pr-2">Action</th><th>Reason</th></tr></thead>
+                  <tbody>
+                    {debug.sample.map((s, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="pr-2 py-1">{s.name}</td><td className="pr-2">{s.category || "—"}</td><td className="pr-2">{s.city || "—"}</td><td className="pr-2">{s.state || "—"}</td><td className="pr-2">{s.website ? "yes" : "no"}</td><td className="pr-2">{s.phone || "—"}</td><td className="pr-2">{s.confidence ?? "—"}</td>
+                        <td className={`pr-2 ${s.action === "error" ? "text-red-600" : s.action === "rejected" ? "text-gray-500" : "text-green-700"}`}>{s.action}</td><td>{s.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
       {/* View controls */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <button onClick={() => setViewMode("current")} className={`text-sm rounded px-3 py-1 border ${viewMode === "current" ? "bg-blue-700 text-white border-blue-700" : "bg-white"}`}>Current Search Results</button>
-        <button onClick={() => { setViewMode("database"); }} className={`text-sm rounded px-3 py-1 border ${viewMode === "database" ? "bg-blue-700 text-white border-blue-700" : "bg-white"}`}>Database View</button>
+        <button onClick={() => setViewMode("database")} className={`text-sm rounded px-3 py-1 border ${viewMode === "database" ? "bg-blue-700 text-white border-blue-700" : "bg-white"}`}>Database View</button>
         <select value={cityFilter} onChange={(e) => { setCityFilter(e.target.value); setViewMode("database"); }} className="text-sm border rounded px-2 py-1">
           <option>All Cities</option>
           {cities.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
-
-      {/* Current-search stats */}
-      {viewMode === "current" && lastSearch && (
-        <div className="mb-4 border rounded-lg p-3 bg-green-50 grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
-          <div><div className="text-xs text-gray-500">Current Search</div><div className="font-semibold">{lastSearch.city}</div></div>
-          <div><div className="text-xs text-gray-500">Results Returned</div><div className="font-semibold">{lastSearch.returned}</div></div>
-          <div><div className="text-xs text-gray-500">Inserted</div><div className="font-semibold">{lastSearch.inserted}</div></div>
-          <div><div className="text-xs text-gray-500">Updated</div><div className="font-semibold">{lastSearch.updated}</div></div>
-          <div><div className="text-xs text-gray-500">Skipped (non-roofing)</div><div className="font-semibold">{lastSearch.skipped}</div></div>
-        </div>
-      )}
 
       {queue.length > 0 && (
         <div className="mb-6 border rounded-lg p-4 bg-blue-50">
