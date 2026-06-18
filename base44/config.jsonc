@@ -1,5 +1,5 @@
 {
-  "name": "New App",
+  "name": "Jackson Ascent Lead Intelligence",
   "site": {
     "installCommand": "npm install",
     "buildCommand": "npm run build",

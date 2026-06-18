@@ -11,6 +11,17 @@
       "type": "string",
       "title": "Business Name"
     },
+    "industry": {
+      "type": "string",
+      "title": "Industry",
+      "default": "roofing",
+      "description": "Home-service vertical. Roofing is the V1 default; the field supports future verticals (hvac, plumbing, electrical, solar, landscaping, etc.)."
+    },
+    "niche": {
+      "type": "string",
+      "title": "Niche / Search Term",
+      "description": "Raw Google Maps search term used to find this business. Mirrors industry in V1."
+    },
     "phone": {
       "type": "string",
       "title": "Phone"
@@ -27,9 +38,21 @@
       "type": "string",
       "title": "Address"
     },
+    "city": {
+      "type": "string",
+      "title": "City"
+    },
+    "state": {
+      "type": "string",
+      "title": "State"
+    },
+    "zip": {
+      "type": "string",
+      "title": "ZIP Code"
+    },
     "rating": {
       "type": "number",
-      "title": "Rating"
+      "title": "Google Rating"
     },
     "review_count": {
       "type": "number",
@@ -39,13 +62,67 @@
       "type": "boolean",
       "title": "Has Website"
     },
-    "niche": {
-      "type": "string",
-      "title": "Niche"
+    "website_health_score": {
+      "type": "number",
+      "title": "Website Health Score",
+      "description": "0-100. Populated by the website analyzer (Phase 2)."
     },
-    "city": {
+    "agency_fit_score": {
+      "type": "number",
+      "title": "Agency Fit Score",
+      "description": "1-5 stars. How good a fit this business is for Jackson Ascent (Phase 2)."
+    },
+    "opportunity_score": {
+      "type": "number",
+      "title": "Opportunity Score",
+      "description": "0-100. Higher = more upside from our services (Phase 2)."
+    },
+    "recommended_service": {
       "type": "string",
-      "title": "City"
+      "title": "Recommended Service",
+      "description": "Primary service to pitch, chosen by the recommendation engine (Phase 2)."
+    },
+    "priority_level": {
+      "type": "string",
+      "title": "Priority Level",
+      "enum": [
+        "Contact Immediately",
+        "High",
+        "Medium",
+        "Low"
+      ],
+      "description": "Outreach priority derived from the scores (Phase 2)."
+    },
+    "score_reasons": {
+      "type": "array",
+      "title": "Score Reasons",
+      "items": {
+        "type": "string"
+      },
+      "description": "Human-readable bullets explaining the scores (Phase 2)."
+    },
+    "pipeline_stage": {
+      "type": "string",
+      "title": "Pipeline Stage",
+      "enum": [
+        "New Lead",
+        "Researching",
+        "Qualified",
+        "Contacted",
+        "Follow Up",
+        "Interested",
+        "Discovery Call",
+        "Proposal Sent",
+        "Closed Won",
+        "Closed Lost"
+      ],
+      "default": "New Lead",
+      "description": "CRM pipeline position (Phase 5)."
+    },
+    "last_scored_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Scored At"
     },
     "scraped_at": {
       "type": "string",
