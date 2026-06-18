@@ -41,7 +41,6 @@ export async function POST(req: Request) {
     if (!runRes.ok) {
       const b = await runRes.text();
       console.error("[scrape/check] getApifyRun not ok", JSON.stringify({ status: runRes.status, body: b.slice(0, 200) }));
-      // Transient poll error — keep waiting rather than failing the whole run.
       return NextResponse.json({ status: "running" });
     }
     const runData = await runRes.json();
@@ -87,6 +86,9 @@ export async function POST(req: Request) {
     const items = await dsRes.json();
     const capped = (Array.isArray(items) ? items : []).slice(0, run.max_results || 50);
     console.log("[scrape/check] dataset items:", Array.isArray(items) ? items.length : 0);
+    if (capped.length > 0) {
+      console.log("[scrape/check] insert table=prospects keys=", JSON.stringify(Object.keys(mapItem(capped[0], run))));
+    }
 
     let inserted = 0;
     let updated = 0;
@@ -111,12 +113,16 @@ export async function POST(req: Request) {
           .from("prospects")
           .update({ ...fields, updated_at: new Date().toISOString() })
           .eq("id", existing.id);
-        if (error) errors.push(`${item.placeId}: ${error.message}`);
-        else updated++;
+        if (error) {
+          console.error("[scrape/check] prospects update error:", JSON.stringify(error));
+          errors.push(`${item.placeId}: ${error.message}`);
+        } else updated++;
       } else {
         const { error } = await supabase.from("prospects").insert(fields);
-        if (error) errors.push(`${item.placeId}: ${error.message}`);
-        else inserted++;
+        if (error) {
+          console.error("[scrape/check] prospects insert error:", JSON.stringify(error));
+          errors.push(`${item.placeId}: ${error.message}`);
+        } else inserted++;
       }
     }
 

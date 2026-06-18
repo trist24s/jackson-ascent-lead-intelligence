@@ -20,14 +20,21 @@ export async function POST(req: Request) {
     }
 
     const supabase = getServiceClient();
+
+    const insertPayload = { run_id: "pending", industry, niche, city, max_results: cap, status: "running" };
+    console.log("[scrape/start] insert table=scrape_runs keys=", JSON.stringify(Object.keys(insertPayload)));
+
     const { data: run, error } = await supabase
       .from("scrape_runs")
-      .insert({ run_id: "pending", industry, niche, city, max_results: cap, status: "running" })
+      .insert(insertPayload)
       .select()
       .single();
     if (error || !run) {
-      console.error("[scrape/start] supabase insert failed:", error?.message);
-      return NextResponse.json({ error: `DB insert failed: ${error?.message || "unknown"}` }, { status: 500 });
+      console.error("[scrape/start] supabase insert error:", JSON.stringify(error));
+      return NextResponse.json(
+        { error: `DB insert failed: ${error?.message || "unknown"}`, supabaseError: error },
+        { status: 500 }
+      );
     }
 
     const apifyRes = await startApifyRun({ niche, city, cap });
