@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
-import { getApifyRun, getApifyDataset, mapItem } from "@/lib/apify";
+import { getApifyRun, getApifyDataset, mapItem, isRelevant } from "@/lib/apify";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,11 +13,7 @@ export async function POST(req: Request) {
     }
 
     const supabase = getServiceClient();
-    const { data: run } = await supabase
-      .from("scrape_runs")
-      .select("*")
-      .eq("id", scrape_run_id)
-      .single();
+    const { data: run } = await supabase.from("scrape_runs").select("*").eq("id", scrape_run_id).single();
     if (!run) {
       return NextResponse.json({ error: "ScrapeRun not found" }, { status: 404 });
     }
@@ -32,7 +28,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // run_id not set yet (start hasn't finished or failed) -> tell client to keep waiting.
     if (!run.run_id || run.run_id === "pending") {
       return NextResponse.json({ status: "running" });
     }
@@ -53,10 +48,7 @@ export async function POST(req: Request) {
 
     if (apifyStatus !== "SUCCEEDED") {
       const msg = `Apify run status: ${apifyStatus}`;
-      await supabase
-        .from("scrape_runs")
-        .update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() })
-        .eq("id", run.id);
+      await supabase.from("scrape_runs").update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() }).eq("id", run.id);
       return NextResponse.json({ status: "failed", error_message: msg });
     }
 
@@ -64,10 +56,7 @@ export async function POST(req: Request) {
     if (!datasetId) {
       const msg = "Apify run succeeded but returned no defaultDatasetId";
       console.error("[scrape/check]", msg, JSON.stringify(runData?.data || {}));
-      await supabase
-        .from("scrape_runs")
-        .update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() })
-        .eq("id", run.id);
+      await supabase.from("scrape_runs").update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() }).eq("id", run.id);
       return NextResponse.json({ status: "failed", error_message: msg });
     }
 
@@ -76,67 +65,47 @@ export async function POST(req: Request) {
       const b = await dsRes.text();
       const msg = `Dataset fetch failed (${dsRes.status}): ${b.slice(0, 200)}`;
       console.error("[scrape/check]", msg);
-      await supabase
-        .from("scrape_runs")
-        .update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() })
-        .eq("id", run.id);
+      await supabase.from("scrape_runs").update({ status: "failed", error_message: msg, completed_at: new Date().toISOString() }).eq("id", run.id);
       return NextResponse.json({ status: "failed", error_message: msg });
     }
 
     const items = await dsRes.json();
     const capped = (Array.isArray(items) ? items : []).slice(0, run.max_results || 50);
     console.log("[scrape/check] dataset items:", Array.isArray(items) ? items.length : 0);
-    if (capped.length > 0) {
-      console.log("[scrape/check] insert table=prospects keys=", JSON.stringify(Object.keys(mapItem(capped[0], run))));
-    }
 
+    const industry = run.niche || run.industry || "roofing";
     let inserted = 0;
     let updated = 0;
     let skipped = 0;
     const errors: string[] = [];
 
     for (const item of capped) {
-      if (!item.placeId || !item.title) {
-        skipped++;
-        continue;
-      }
+      if (!item.placeId || !item.title) { skipped++; continue; }
+      // V2 FEATURE 7: skip clearly-irrelevant businesses (hardware stores, auto repair, etc.).
+      if (!isRelevant(item, industry)) { skipped++; continue; }
+
       const fields = mapItem(item, run);
-      const { data: existing } = await supabase
-        .from("prospects")
-        .select("id")
-        .eq("place_id", item.placeId)
-        .maybeSingle();
+      const { data: existing } = await supabase.from("prospects").select("id").eq("place_id", item.placeId).maybeSingle();
 
       if (existing) {
-        // Upsert: refresh scrape data, preserve CRM fields (qualified, stage, scores).
-        const { error } = await supabase
-          .from("prospects")
-          .update({ ...fields, updated_at: new Date().toISOString() })
-          .eq("id", existing.id);
-        if (error) {
-          console.error("[scrape/check] prospects update error:", JSON.stringify(error));
-          errors.push(`${item.placeId}: ${error.message}`);
-        } else updated++;
+        const { error } = await supabase.from("prospects").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", existing.id);
+        if (error) { console.error("[scrape/check] prospects update error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
+        else updated++;
       } else {
         const { error } = await supabase.from("prospects").insert(fields);
-        if (error) {
-          console.error("[scrape/check] prospects insert error:", JSON.stringify(error));
-          errors.push(`${item.placeId}: ${error.message}`);
-        } else inserted++;
+        if (error) { console.error("[scrape/check] prospects insert error:", JSON.stringify(error)); errors.push(`${item.placeId}: ${error.message}`); }
+        else inserted++;
       }
     }
 
-    await supabase
-      .from("scrape_runs")
-      .update({
-        status: "complete",
-        inserted,
-        updated,
-        skipped,
-        error_message: errors.join(" | ").slice(0, 500),
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", run.id);
+    await supabase.from("scrape_runs").update({
+      status: "complete",
+      inserted,
+      updated,
+      skipped,
+      error_message: errors.join(" | ").slice(0, 500),
+      completed_at: new Date().toISOString(),
+    }).eq("id", run.id);
 
     console.log("[scrape/check] complete", JSON.stringify({ inserted, updated, skipped }));
     return NextResponse.json({ status: "complete", inserted, updated, skipped });
