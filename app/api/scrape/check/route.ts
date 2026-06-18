@@ -5,7 +5,6 @@ import { getApifyRun, getApifyDataset, mapItem } from "@/lib/apify";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// V3: only import businesses we're confident are roofing/exterior contractors.
 const MIN_CONFIDENCE = 70;
 
 export async function POST(req: Request) {
@@ -18,7 +17,7 @@ export async function POST(req: Request) {
     if (!run) return NextResponse.json({ error: "ScrapeRun not found" }, { status: 404 });
 
     if (run.status === "complete" || run.status === "failed") {
-      return NextResponse.json({ status: run.status, inserted: run.inserted, updated: run.updated, skipped: run.skipped, error_message: run.error_message });
+      return NextResponse.json({ status: run.status, returned: run.returned ?? null, inserted: run.inserted, updated: run.updated, skipped: run.skipped, error_message: run.error_message });
     }
     if (!run.run_id || run.run_id === "pending") return NextResponse.json({ status: "running" });
 
@@ -30,7 +29,7 @@ export async function POST(req: Request) {
     }
     const runData = await runRes.json();
     const apifyStatus = runData?.data?.status;
-    console.log("[scrape/check] Apify run status:", apifyStatus, "run:", run.run_id);
+    console.log("[scrape/check] Apify run status:", apifyStatus, "run:", run.run_id, "city:", run.city);
 
     if (!apifyStatus || apifyStatus === "RUNNING" || apifyStatus === "READY") return NextResponse.json({ status: "running" });
 
@@ -57,7 +56,8 @@ export async function POST(req: Request) {
 
     const items = await dsRes.json();
     const capped = (Array.isArray(items) ? items : []).slice(0, run.max_results || 50);
-    console.log("[scrape/check] dataset items:", Array.isArray(items) ? items.length : 0);
+    const returned = capped.length;
+    console.log("[scrape/check] city:", run.city, "dataset items returned:", Array.isArray(items) ? items.length : 0, "processing:", returned);
 
     let inserted = 0;
     let updated = 0;
@@ -67,7 +67,6 @@ export async function POST(req: Request) {
     for (const item of capped) {
       if (!item.placeId || !item.title) { skipped++; continue; }
       const fields = mapItem(item, run);
-      // V3 FEATURE 1: skip low-confidence (non-roofing) businesses.
       if ((fields.roofing_confidence ?? 0) < MIN_CONFIDENCE) { skipped++; continue; }
 
       const { data: existing } = await supabase.from("prospects").select("id").eq("place_id", item.placeId).maybeSingle();
@@ -87,8 +86,8 @@ export async function POST(req: Request) {
       error_message: errors.join(" | ").slice(0, 500), completed_at: new Date().toISOString(),
     }).eq("id", run.id);
 
-    console.log("[scrape/check] complete", JSON.stringify({ inserted, updated, skipped }));
-    return NextResponse.json({ status: "complete", inserted, updated, skipped });
+    console.log("[scrape/check] complete", JSON.stringify({ city: run.city, returned, inserted, updated, skipped }));
+    return NextResponse.json({ status: "complete", returned, inserted, updated, skipped });
   } catch (err: any) {
     console.error("[scrape/check] fatal:", err?.message, err?.stack);
     return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
