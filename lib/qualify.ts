@@ -1,8 +1,7 @@
 // Rule-based roofing qualification. Pure, no I/O. Scores how confident we are that a
-// scraped business is a real roofing/exterior contractor (0-100), using Google's own
-// category plus the business name. Google categories (e.g. "Roofing contractor") are
-// highly reliable, so this is accurate without an LLM. A future LLM pass can replace
-// the body of roofingConfidence() without changing any callers.
+// scraped business is a roofing/exterior contractor (0-100), from Google's category +
+// the business name. Any clear roofing signal qualifies; only clearly-unrelated business
+// types are rejected. A future LLM pass can replace the body without changing callers.
 
 export type QualifyInput = {
   category?: string | null;
@@ -10,8 +9,10 @@ export type QualifyInput = {
   industry?: string | null;
 };
 
+// Adjacent exterior trades we also accept.
 const RELATED = ["siding", "gutter", "exterior"];
 
+// Clearly-unrelated business types (only rejected when there is NO roofing signal).
 const EXCLUDE = [
   "hardware", "home improvement", "building material", "lumber",
   "auto", "car repair", "car dealer", "tire", "mechanic",
@@ -25,26 +26,24 @@ const EXCLUDE = [
 
 export function roofingConfidence(input: QualifyInput): number {
   const industry = (input.industry || "roofing").toLowerCase();
-  const root = industry.replace(/ing$/, ""); // "roofing" -> "roof"
+  const root = industry.replace(/ing$/, ""); // "roofing" -> "roof" (matches roof, roofer, roofing)
   const cat = (input.category || "").toLowerCase();
   const name = (input.name || "").toLowerCase();
   const hay = `${cat} ${name}`;
 
-  const mentionsRoot = hay.includes(root);
-  const excluded = EXCLUDE.some((t) => hay.includes(t));
+  // Strong roofing signal in category or name -> accept.
+  const strong = [root, "re-roof", "shingle"];
+  if (strong.some((t) => hay.includes(t))) return cat.includes(root) ? 97 : 90;
 
-  // Strongest signal: Google category names the trade.
-  if (cat.includes("roofing") || cat.includes(root + "ing")) return 97;
-  if (cat.includes(root)) return 94;
-  // Business name names the trade.
-  if (name.includes(root)) return 86;
-  // Adjacent exterior trades in the category.
-  if (RELATED.some((t) => cat.includes(t))) return 80;
-  if (RELATED.some((t) => hay.includes(t)) && !excluded) return 74;
-  // Clearly unrelated business types.
-  if (excluded && !mentionsRoot) return 12;
-  // Generic contractor/construction without a clear trade signal.
+  // Adjacent exterior trades -> accept.
+  if (RELATED.some((t) => hay.includes(t))) return 80;
+
+  // Clearly-unrelated business type with no roofing signal -> reject.
+  if (EXCLUDE.some((t) => hay.includes(t))) return 12;
+
+  // Generic contractor/construction with no roofing keyword -> borderline (below threshold).
   if (cat.includes("contractor") || cat.includes("construction")) return 55;
+
   return 35;
 }
 
