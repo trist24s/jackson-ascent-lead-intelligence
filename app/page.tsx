@@ -18,8 +18,10 @@ type Prospect = {
   pipeline_stage: string | null; qualified: boolean | null;
   roofing_confidence: number | null; owner_name: string | null;
   linkedin_url: string | null; facebook_url: string | null; google_profile_url: string | null;
+  scrape_run_id: string | null;
 };
 type Note = { id: string; prospect_id: string; body: string; created_at: string };
+type LastSearch = { city: string; returned: number; inserted: number; updated: number; skipped: number; runId: string };
 
 const SCORE_CLASS: Record<string, string> = { green: "bg-green-100 text-green-800", yellow: "bg-yellow-100 text-yellow-800", red: "bg-red-100 text-red-700" };
 const STATUS_LABEL: Record<string, string> = { open: "🟢 Open Now", closed: "🔴 Closed", closing_soon: "🟡 Closing Soon", unknown: "—" };
@@ -34,6 +36,9 @@ export default function Home() {
   const [selected, setSelected] = useState<Prospect | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteText, setNoteText] = useState("");
+  const [viewMode, setViewMode] = useState<"current" | "database">("database");
+  const [cityFilter, setCityFilter] = useState("All Cities");
+  const [lastSearch, setLastSearch] = useState<LastSearch | null>(null);
 
   async function loadProspects() {
     try {
@@ -58,26 +63,40 @@ export default function Home() {
     });
   }, [prospects]);
 
-  // FEATURE 1: only show confidently-roofing businesses.
   const qualified = useMemo(() => derived.filter((d) => d.confidence > 70), [derived]);
 
+  const cities = useMemo(
+    () => Array.from(new Set(prospects.map((p) => p.city).filter((c): c is string => !!c))).sort(),
+    [prospects]
+  );
+
+  // City-scoped view: most-recent scrape only, or the whole database (optionally one city).
+  const visible = useMemo(() => {
+    if (viewMode === "current") {
+      if (!lastSearch?.runId) return [];
+      return qualified.filter((d) => d.p.scrape_run_id === lastSearch.runId);
+    }
+    if (cityFilter !== "All Cities") return qualified.filter((d) => (d.p.city || "") === cityFilter);
+    return qualified;
+  }, [qualified, viewMode, cityFilter, lastSearch]);
+
   const metrics = useMemo(() => {
-    const total = qualified.length;
-    const high = qualified.filter((d) => d.priority.level === "immediate" || d.priority.level === "high").length;
-    const contacted = qualified.filter((d) => stageIndex(d.p.pipeline_stage) >= stageIndex("Contacted")).length;
-    const discovery = qualified.filter((d) => stageIndex(d.p.pipeline_stage) >= stageIndex("Discovery Call")).length;
-    const won = qualified.filter((d) => d.p.pipeline_stage === "Won").length;
+    const total = visible.length;
+    const high = visible.filter((d) => d.priority.level === "immediate" || d.priority.level === "high").length;
+    const contacted = visible.filter((d) => stageIndex(d.p.pipeline_stage) >= stageIndex("Contacted")).length;
+    const discovery = visible.filter((d) => stageIndex(d.p.pipeline_stage) >= stageIndex("Discovery Call")).length;
+    const won = visible.filter((d) => d.p.pipeline_stage === "Won").length;
     const conversion = total ? `${((won / total) * 100).toFixed(1)}%` : "0%";
     return { total, high, contacted, discovery, won, conversion };
-  }, [qualified]);
+  }, [visible]);
 
-  // FEATURE 7: Today's Call List — top 10 by priority then score.
   const queue = useMemo(() => {
-    return [...qualified].sort((a, b) => (PRANK[a.priority.level] - PRANK[b.priority.level]) || (b.score - a.score)).slice(0, 10);
-  }, [qualified]);
+    return [...visible].sort((a, b) => (PRANK[a.priority.level] - PRANK[b.priority.level]) || (b.score - a.score)).slice(0, 10);
+  }, [visible]);
 
   async function runScrape(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true); setStatus("Starting scrape…");
+    e.preventDefault(); setBusy(true); setStatus(`Starting scrape for ${city}…`);
+    console.log("[scrape] city submitted:", city, "industry:", industry, "max:", maxResults);
     try {
       const startRes = await fetch("/api/scrape/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ industry, niche: industry, city, max_results: maxResults }) });
       const run = await startRes.json();
@@ -87,9 +106,12 @@ export default function Home() {
         await new Promise((r) => setTimeout(r, 3000));
         const checkRes = await fetch("/api/scrape/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scrape_run_id: run.id }) });
         const data = await checkRes.json();
-        if (data.status === "running") { setStatus("Scraping… this usually takes 30–90 seconds."); continue; }
-        if (data.status === "complete") setStatus(`Done — ${data.inserted} new, ${data.updated} updated, ${data.skipped} skipped (non-roofing skipped).`);
-        else setStatus(`Scrape ${data.status || "error"}: ${data.error_message || data.error || ""}`);
+        if (data.status === "running") { setStatus(`Scraping ${city}… this usually takes 30–90 seconds.`); continue; }
+        if (data.status === "complete") {
+          setStatus(`Done with ${city} — ${data.returned ?? "?"} returned, ${data.inserted} new, ${data.updated} updated, ${data.skipped} skipped.`);
+          setLastSearch({ city, returned: data.returned ?? 0, inserted: data.inserted ?? 0, updated: data.updated ?? 0, skipped: data.skipped ?? 0, runId: run.id });
+          setViewMode("current");
+        } else setStatus(`Scrape ${data.status || "error"}: ${data.error_message || data.error || ""}`);
         done = true;
       }
       await loadProspects();
@@ -123,27 +145,27 @@ export default function Home() {
   }
 
   async function exportCsv() {
-    if (!qualified.length) return;
+    if (!visible.length) return;
     let byProspect: Record<string, string> = {};
     try {
       const res = await fetch("/api/notes", { cache: "no-store" });
       if (res.ok) { const all: Note[] = await res.json(); for (const n of all) byProspect[n.prospect_id] = byProspect[n.prospect_id] ? `${byProspect[n.prospect_id]} || ${n.body}` : n.body; }
     } catch (e) { /* best effort */ }
     const headers = ["name", "phone", "email", "website", "address", "city", "state", "zip", "rating", "review_count", "roofing_confidence", "lead_score", "priority", "recommended_service", "opportunity", "best_call_window", "pipeline_stage", "notes"];
-    const rows = qualified.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.address, d.p.city, d.p.state, d.p.zip, d.p.rating, d.p.review_count, d.confidence, d.score, d.priority.label, d.service.service, d.opp.display, d.cw.window, d.p.pipeline_stage || "New Lead", byProspect[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
+    const rows = visible.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.address, d.p.city, d.p.state, d.p.zip, d.p.rating, d.p.review_count, d.confidence, d.score, d.priority.label, d.service.service, d.opp.display, d.cw.window, d.p.pipeline_stage || "New Lead", byProspect[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
     download("jackson-ascent-leads.csv", [headers.join(","), ...rows].join("\n"));
   }
 
-  // FEATURE 8: Call Sheet CSV.
   function exportCallSheet() {
-    if (!queue.length && !qualified.length) return;
-    const list = qualified.length ? [...qualified].sort((a, b) => (PRANK[a.priority.level] - PRANK[b.priority.level]) || (b.score - a.score)) : [];
+    if (!visible.length) return;
+    const list = [...visible].sort((a, b) => (PRANK[a.priority.level] - PRANK[b.priority.level]) || (b.score - a.score));
     const headers = ["Business Name", "Phone", "Best Call Time", "Priority", "Lead Score", "Recommended Service"];
     const rows = list.map((d) => [d.p.name, d.p.phone, d.cw.window, d.priority.label, d.score, d.service.service].map((v) => JSON.stringify(v ?? "")).join(","));
     download("call-sheet.csv", [headers.join(","), ...rows].join("\n"));
   }
 
   const sd = selected ? derived.find((d) => d.p.id === selected.id) : null;
+  const heading = viewMode === "current" ? (lastSearch ? `Current Search: ${lastSearch.city}` : "Current Search") : (cityFilter === "All Cities" ? "All Saved Leads" : `Leads in ${cityFilter}`);
 
   return (
     <main className="min-h-screen max-w-7xl mx-auto p-6">
@@ -163,13 +185,33 @@ export default function Home() {
 
       <form onSubmit={runScrape} className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
         <input className="border rounded px-3 py-2" value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="Industry (e.g. roofing)" />
-        <input className="border rounded px-3 py-2" value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (e.g. Harrisburg, PA)" required />
+        <input className="border rounded px-3 py-2" value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (e.g. Houston, TX)" required />
         <input className="border rounded px-3 py-2" type="number" min={1} max={500} value={maxResults} onChange={(e) => setMaxResults(Number(e.target.value))} placeholder="Max results" />
         <button disabled={busy} className="bg-blue-700 text-white rounded px-4 py-2 disabled:opacity-50">{busy ? "Working…" : "Scrape leads"}</button>
       </form>
-      {status && <p className="mb-4 text-sm text-gray-700">{status}</p>}
+      {status && <p className="mb-3 text-sm text-gray-700">{status}</p>}
 
-      {/* FEATURE 7: Today's Call List */}
+      {/* View controls */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button onClick={() => setViewMode("current")} className={`text-sm rounded px-3 py-1 border ${viewMode === "current" ? "bg-blue-700 text-white border-blue-700" : "bg-white"}`}>Current Search Results</button>
+        <button onClick={() => { setViewMode("database"); }} className={`text-sm rounded px-3 py-1 border ${viewMode === "database" ? "bg-blue-700 text-white border-blue-700" : "bg-white"}`}>Database View</button>
+        <select value={cityFilter} onChange={(e) => { setCityFilter(e.target.value); setViewMode("database"); }} className="text-sm border rounded px-2 py-1">
+          <option>All Cities</option>
+          {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {/* Current-search stats */}
+      {viewMode === "current" && lastSearch && (
+        <div className="mb-4 border rounded-lg p-3 bg-green-50 grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
+          <div><div className="text-xs text-gray-500">Current Search</div><div className="font-semibold">{lastSearch.city}</div></div>
+          <div><div className="text-xs text-gray-500">Results Returned</div><div className="font-semibold">{lastSearch.returned}</div></div>
+          <div><div className="text-xs text-gray-500">Inserted</div><div className="font-semibold">{lastSearch.inserted}</div></div>
+          <div><div className="text-xs text-gray-500">Updated</div><div className="font-semibold">{lastSearch.updated}</div></div>
+          <div><div className="text-xs text-gray-500">Skipped (non-roofing)</div><div className="font-semibold">{lastSearch.skipped}</div></div>
+        </div>
+      )}
+
       {queue.length > 0 && (
         <div className="mb-6 border rounded-lg p-4 bg-blue-50">
           <div className="flex items-center justify-between mb-2">
@@ -188,7 +230,7 @@ export default function Home() {
       )}
 
       <div className="flex items-center justify-between mb-2">
-        <h2 className="font-semibold">Qualified Roofing Leads ({qualified.length})</h2>
+        <h2 className="font-semibold">{heading} ({visible.length})</h2>
         <div className="flex gap-2">
           <button onClick={loadProspects} className="text-sm border rounded px-3 py-1">Refresh</button>
           <button onClick={exportCsv} className="text-sm border rounded px-3 py-1">Export CSV</button>
@@ -201,7 +243,7 @@ export default function Home() {
             <th className="px-3 py-2">Business</th><th className="px-3 py-2">Conf</th><th className="px-3 py-2">Score</th><th className="px-3 py-2">Priority</th><th className="px-3 py-2">Recommended</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Stage</th>
           </tr></thead>
           <tbody>
-            {qualified.map((d) => (
+            {visible.map((d) => (
               <tr key={d.p.id} className="border-t hover:bg-blue-50">
                 <td className="px-3 py-2"><button onClick={() => openDetail(d.p)} className="text-left"><span className="font-medium text-blue-700 underline">{d.p.name}</span><span className="block text-xs text-gray-400">{d.p.city}{d.p.state ? `, ${d.p.state}` : ""}</span></button></td>
                 <td className="px-3 py-2 text-gray-600">{d.confidence}%</td>
@@ -212,7 +254,9 @@ export default function Home() {
                 <td className="px-3 py-2"><select value={d.p.pipeline_stage || "New Lead"} onChange={(e) => updateStage(d.p.id, e.target.value)} className="border rounded px-2 py-1 text-xs">{STAGES.map((s) => <option key={s} value={s}>{s}</option>)}</select></td>
               </tr>
             ))}
-            {!qualified.length && <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-400">No qualified roofing leads yet. Run a scrape to get started.</td></tr>}
+            {!visible.length && (
+              <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-400">{viewMode === "current" && !lastSearch ? "Run a scrape to see current results, or switch to Database View." : "No leads in this view."}</td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -230,6 +274,7 @@ export default function Home() {
               <div><span className="text-gray-500">Phone:</span> {selected.phone ? <a className="text-blue-600" href={`tel:${selected.phone}`}>{selected.phone}</a> : "—"}</div>
               <div><span className="text-gray-500">Website:</span> {selected.website ? <a className="text-blue-600 underline" href={selected.website} target="_blank" rel="noreferrer">{selected.website}</a> : "none"}</div>
               <div><span className="text-gray-500">Address:</span> {selected.address || "—"}</div>
+              <div><span className="text-gray-500">City:</span> {selected.city || "—"}{selected.state ? `, ${selected.state}` : ""}</div>
               <div><span className="text-gray-500">Rating:</span> {selected.rating ?? "—"} ({selected.review_count ?? 0} reviews)</div>
             </div>
             <div className="border rounded p-3 mb-3 bg-gray-50 text-sm">

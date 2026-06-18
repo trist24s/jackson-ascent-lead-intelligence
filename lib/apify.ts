@@ -34,7 +34,7 @@ export function buildRunInput(niche: string, city: string, cap: number) {
 export async function startApifyRun(opts: { niche: string; city: string; cap: number }): Promise<Response> {
   const url = `${APIFY_BASE}/acts/${ACTOR_ID}/runs`;
   const input = buildRunInput(opts.niche, opts.city, opts.cap);
-  console.log("[apify] startApifyRun ->", JSON.stringify({ actorId: ACTOR_ID, url, input }));
+  console.log("[apify] startApifyRun ->", JSON.stringify({ actorId: ACTOR_ID, url, locationQuery: opts.city, input }));
   const res = await fetch(url, { method: "POST", headers: authHeaders(), body: JSON.stringify(input) });
   console.log("[apify] startApifyRun response status:", res.status);
   return res;
@@ -58,7 +58,7 @@ export async function getApifyDataset(datasetId: string): Promise<Response> {
   return res;
 }
 
-type RunContext = { industry?: string | null; niche?: string | null; city?: string | null };
+type RunContext = { id?: string | null; industry?: string | null; niche?: string | null; city?: string | null };
 
 // Maps one Apify place item to scrape-owned Prospect columns.
 // Returns ONLY scrape-sourced fields — never pipeline_stage, qualified, scores, or notes.
@@ -88,6 +88,7 @@ export function mapItem(item: any, run: RunContext) {
     owner_name: null,
     linkedin_url: null,
     facebook_url: null,
+    scrape_run_id: run.id ?? null,
     scraped_at: new Date().toISOString(),
   };
 }
