@@ -15,21 +15,22 @@ function hasHours(p: SalesInput): boolean {
   return Array.isArray(p.business_hours) && (p.business_hours as unknown[]).length > 0;
 }
 
-// ---------------------------------------------------------------------------
-// The offer (single Growth System).
-// ---------------------------------------------------------------------------
 export const GROWTH_SYSTEM = {
   name: "Growth System",
-  setup: 1000,          // standard one-time setup
-  monthly: 2000,        // standard recurring
-  fcoFirstMonth: 1500,  // Founding Client Offer: first month total (setup + month 1)
+  setup: 1000,
+  monthly: 2000,
+  fcoFirstMonth: 1500,
   adSpendNote: "Ad spend billed separately, directly by the client.",
 };
 export const FOUNDING_CLIENT_LIMIT = 3;
 
-// ---------------------------------------------------------------------------
-// Opportunity Score (0-100).
-// ---------------------------------------------------------------------------
+// One-click Meta Ad Library lookup for a business (free, public). Opens active ads
+// matching the business name so you can eyeball whether they're advertising.
+export function adLibraryUrl(name: string, state?: string | null): string {
+  const q = encodeURIComponent([name, state].filter(Boolean).join(" "));
+  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&q=${q}&search_type=keyword_unordered`;
+}
+
 export function opportunityScore(p: SalesInput): { score: number; category: "Low" | "Medium" | "High" } {
   let s = 0;
   const rc = p.review_count ?? 0;
@@ -49,11 +50,6 @@ export function opportunityScore(p: SalesInput): { score: number; category: "Low
   return { score, category };
 }
 
-// ---------------------------------------------------------------------------
-// Fit: is this roofer a good fit for the Growth System (~$2k/mo)?
-// Ideal client = established roofer with capacity, real lead volume, and clear
-// missed-call / follow-up gaps who can support the monthly and fund ad spend.
-// ---------------------------------------------------------------------------
 export type Fit = { level: "Strong Fit" | "Possible Fit" | "Weak Fit"; reason: string };
 
 export function fitAssessment(p: SalesInput): Fit {
@@ -69,20 +65,14 @@ export function fitAssessment(p: SalesInput): Fit {
   return { level: "Weak Fit", reason: "Small or low-signal — may not have the volume or budget for the Growth System yet." };
 }
 
-// ---------------------------------------------------------------------------
-// Estimated monthly ROI — booked estimates recovered from faster lead response.
-// ---------------------------------------------------------------------------
 export function estimatedMonthlyROI(p: SalesInput): { amount: number; appts: number; display: string } {
   const rc = p.review_count ?? 0;
   const appts = rc >= 150 ? 6 : rc >= 75 ? 5 : rc >= 30 ? 3 : 2;
-  const avgJob = 9000; // avg roofing job revenue
+  const avgJob = 9000;
   const amount = appts * avgJob;
   return { amount, appts, display: `~$${amount.toLocaleString()}/mo (${appts} recovered estimates)` };
 }
 
-// ---------------------------------------------------------------------------
-// Sales angle, objection, response — framed around the complete Growth System.
-// ---------------------------------------------------------------------------
 export function salesAngle(p: SalesInput): string {
   const rc = p.review_count ?? 0;
   const r = p.rating ?? 0;
@@ -114,7 +104,6 @@ export function suggestedResponse(p: SalesInput): string {
   return RESPONSES[objectionPrediction(p)] || RESPONSES["We already answer our own phones."];
 }
 
-// Everything a salesperson needs for one lead.
 export function salesIntel(p: SalesInput) {
   return {
     offer: GROWTH_SYSTEM,

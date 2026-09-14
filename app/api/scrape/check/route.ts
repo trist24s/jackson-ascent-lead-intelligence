@@ -75,18 +75,11 @@ export async function POST(req: Request) {
       const category = item.categoryName ?? (Array.isArray(item.categories) ? item.categories[0] : null) ?? null;
       const base = { name: item.title || "(no name)", category, city: item.city ?? null, state: item.state ?? null, website: !!item.website, phone: item.phone ?? null };
 
-      if (!item.placeId || !item.title) {
-        rejected++;
-        sample.push({ ...base, confidence: null, action: "rejected", reason: "Missing place_id or title" });
-        continue;
-      }
+      if (!item.placeId || !item.title) { rejected++; sample.push({ ...base, confidence: null, action: "rejected", reason: "Missing place_id or title" }); continue; }
       const fields = mapItem(item, run);
       const conf = fields.roofing_confidence ?? 0;
-      if (conf < MIN_CONFIDENCE) {
-        rejected++;
-        sample.push({ ...base, confidence: conf, action: "rejected", reason: `Low roofing confidence (${conf}%) for category "${fields.category || "unknown"}"` });
-        continue;
-      }
+      if (conf < MIN_CONFIDENCE) { rejected++; sample.push({ ...base, confidence: conf, action: "rejected", reason: `Low roofing confidence (${conf}%) for category "${fields.category || "unknown"}"` }); continue; }
+      if (fields.permanently_closed) { rejected++; sample.push({ ...base, confidence: conf, action: "rejected", reason: "Permanently closed" }); continue; }
       qualified++;
 
       const { data: existing } = await supabase.from("prospects").select("id").eq("place_id", item.placeId).maybeSingle();

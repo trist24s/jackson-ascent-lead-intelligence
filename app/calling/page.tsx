@@ -5,7 +5,7 @@ import Link from "next/link";
 import { leadScore, contactPriority, decisionMakerProbability } from "@/lib/scoring";
 import { callWindow, hoursIntel, type OpeningHour } from "@/lib/hours";
 import { roofingConfidence } from "@/lib/qualify";
-import { salesIntel } from "@/lib/sales";
+import { salesIntel, adLibraryUrl } from "@/lib/sales";
 
 const STATUS_LABEL: Record<string, string> = { open: "🟢 Open Now", closed: "🔴 Closed", closing_soon: "🟡 Closing Soon", unknown: "—" };
 const FIT_CLASS: Record<string, string> = { "Strong Fit": "bg-green-100 text-green-800", "Possible Fit": "bg-amber-100 text-amber-800", "Weak Fit": "bg-gray-100 text-gray-600" };
@@ -15,7 +15,7 @@ type Prospect = {
   website: string | null; city: string | null; state: string | null; rating: number | null;
   review_count: number | null; has_website: boolean | null; description: string | null;
   category: string | null; business_hours: OpeningHour[] | null; pipeline_stage: string | null;
-  roofing_confidence: number | null;
+  roofing_confidence: number | null; permanently_closed: boolean | null; ads_score: number | null; ads_running: boolean | null;
 };
 type Note = { id: string; prospect_id: string; body: string; created_at: string };
 
@@ -38,7 +38,7 @@ export default function Calling() {
         const input = { ...p, industry: p.industry || "roofing", roofing_confidence: conf };
         return { p, conf, score: leadScore(input).score, priority: contactPriority(input), dm: decisionMakerProbability(input), intel: salesIntel(input) };
       })
-      .filter((d) => d.conf > 70 && d.p.pipeline_stage !== "Won" && d.p.pipeline_stage !== "Lost")
+      .filter((d) => d.conf > 70 && !d.p.permanently_closed && d.p.pipeline_stage !== "Won" && d.p.pipeline_stage !== "Lost")
       .sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || (b.dm - a.dm) || (b.score - a.score));
   }, [prospects]);
 
@@ -95,6 +95,7 @@ export default function Calling() {
               <a href={current.p.phone ? `tel:${current.p.phone}` : undefined} className="text-3xl font-bold text-blue-700 block mb-2">{current.p.phone || "No phone on file"}</a>
               <div className="text-sm"><span className="text-gray-500">Best Call Window:</span> <span className="font-medium">{cw?.window}</span></div>
               {cw?.reason && <div className="text-xs text-gray-500">{cw.reason}</div>}
+              <div className="text-sm mt-2"><a href={adLibraryUrl(current.p.name, current.p.state)} target="_blank" rel="noreferrer" className="text-blue-600 underline">Check Meta Ads →</a>{current.p.ads_score != null ? <span className="text-gray-600"> · Ads {current.p.ads_score}/10{current.p.ads_running ? " (running)" : ""}</span> : null}</div>
             </div>
 
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 text-sm">

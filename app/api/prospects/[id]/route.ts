@@ -15,16 +15,21 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const update: Record<string, any> = {};
 
     if (typeof body.pipeline_stage === "string") {
-      if (!STAGES.includes(body.pipeline_stage)) {
-        return NextResponse.json({ error: `Invalid stage: ${body.pipeline_stage}` }, { status: 400 });
-      }
+      if (!STAGES.includes(body.pipeline_stage)) return NextResponse.json({ error: `Invalid stage: ${body.pipeline_stage}` }, { status: 400 });
       update.pipeline_stage = body.pipeline_stage;
     }
     if (typeof body.qualified === "boolean") update.qualified = body.qualified;
 
-    if (Object.keys(update).length === 0) {
-      return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+    // Meta ads (manual scoring)
+    if (body.ads_score !== undefined && body.ads_score !== null) {
+      const v = Math.round(Number(body.ads_score));
+      if (isNaN(v) || v < 0 || v > 10) return NextResponse.json({ error: "ads_score must be 0-10" }, { status: 400 });
+      update.ads_score = v;
     }
+    if (typeof body.ads_running === "boolean") update.ads_running = body.ads_running;
+    if (typeof body.ads_notes === "string") update.ads_notes = body.ads_notes;
+
+    if (Object.keys(update).length === 0) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     update.updated_at = new Date().toISOString();
 
     const supabase = getServiceClient();
