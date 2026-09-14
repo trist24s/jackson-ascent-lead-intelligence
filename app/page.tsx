@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { leadScore, scoreColor, contactPriority, decisionMakerProbability } from "@/lib/scoring";
 import { callWindow, hoursIntel, formatHours, type OpeningHour } from "@/lib/hours";
-import { roofingConfidence, confidenceLabel } from "@/lib/qualify";
+import { roofingConfidence } from "@/lib/qualify";
 import { salesIntel } from "@/lib/sales";
 
 const STAGES = ["New Lead", "Researched", "Qualified", "Contacted", "Follow Up", "Interested", "Discovery Call", "Proposal Sent", "Won", "Lost"];
@@ -27,9 +27,8 @@ type LastSearch = { city: string; returned: number; inserted: number; updated: n
 
 const SCORE_CLASS: Record<string, string> = { green: "bg-green-100 text-green-800", yellow: "bg-amber-100 text-amber-800", red: "bg-red-100 text-red-700" };
 const OPP_CLASS: Record<string, string> = { High: "bg-green-100 text-green-800", Medium: "bg-amber-100 text-amber-800", Low: "bg-gray-100 text-gray-600" };
-const OFFER_CLASS: Record<string, string> = { "AI Lead Conversations": "bg-blue-100 text-blue-800", "Complete Growth System": "bg-indigo-100 text-indigo-800" };
+const FIT_CLASS: Record<string, string> = { "Strong Fit": "bg-green-100 text-green-800", "Possible Fit": "bg-amber-100 text-amber-800", "Weak Fit": "bg-gray-100 text-gray-600" };
 const STATUS_LABEL: Record<string, string> = { open: "🟢 Open Now", closed: "🔴 Closed", closing_soon: "🟡 Closing Soon", unknown: "—" };
-const PRANK: Record<string, number> = { immediate: 0, high: 1, medium: 2, low: 3 };
 
 export default function Home() {
   const [industry, setIndustry] = useState("roofing");
@@ -82,11 +81,13 @@ export default function Home() {
     const appts = visible.filter((d) => stageIndex(d.p.pipeline_stage) >= stageIndex("Discovery Call")).length;
     const discovery = visible.filter((d) => d.p.pipeline_stage === "Discovery Call").length;
     const won = visible.filter((d) => d.p.pipeline_stage === "Won").length;
+    // Pipeline value = setup + 12 months across active deals (single Growth System offer).
     const pipelineValue = visible.filter((d) => ACTIVE.has(d.p.pipeline_stage || "")).reduce((s, d) => s + d.intel.offer.setup + d.intel.offer.monthly * 12, 0);
     const conversion = total ? `${((won / total) * 100).toFixed(1)}%` : "0%";
     return { total, high, callsMade, appts, discovery, won, pipelineValue, conversion };
   }, [visible]);
 
+  // Today's call list: opportunity, then decision-maker probability, then lead score.
   const queue = useMemo(() => {
     return [...visible].sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || (b.dm - a.dm) || (b.score - a.score)).slice(0, 10);
   }, [visible]);
@@ -139,15 +140,15 @@ export default function Home() {
     if (!visible.length) return;
     let byP: Record<string, string> = {};
     try { const res = await fetch("/api/notes", { cache: "no-store" }); if (res.ok) { const all: Note[] = await res.json(); for (const n of all) byP[n.prospect_id] = byP[n.prospect_id] ? `${byP[n.prospect_id]} || ${n.body}` : n.body; } } catch (e) { /* */ }
-    const headers = ["name", "phone", "email", "website", "city", "state", "rating", "review_count", "roofing_confidence", "lead_score", "opportunity_score", "priority", "recommended_offer", "setup_fee", "monthly", "est_monthly_roi", "best_call_window", "pipeline_stage", "notes"];
-    const rows = visible.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.city, d.p.state, d.p.rating, d.p.review_count, d.confidence, d.score, d.intel.opp.score, d.priority.label, d.intel.offer.name, d.intel.offer.setup, d.intel.offer.monthly, d.intel.roi.amount, d.cw.window, d.p.pipeline_stage || "New Lead", byP[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
+    const headers = ["name", "phone", "email", "website", "city", "state", "rating", "review_count", "roofing_confidence", "lead_score", "opportunity_score", "fit", "priority", "recommended", "standard_setup", "standard_monthly", "fco_first_month", "est_monthly_roi", "best_call_window", "pipeline_stage", "notes"];
+    const rows = visible.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.city, d.p.state, d.p.rating, d.p.review_count, d.confidence, d.score, d.intel.opp.score, d.intel.fit.level, d.priority.label, d.intel.offer.name, d.intel.offer.setup, d.intel.offer.monthly, d.intel.offer.fcoFirstMonth, d.intel.roi.amount, d.cw.window, d.p.pipeline_stage || "New Lead", byP[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
     download("jackson-ascent-leads.csv", [headers.join(","), ...rows].join("\n"));
   }
   function exportCallSheet() {
     if (!visible.length) return;
     const list = [...queue];
-    const headers = ["Business Name", "Phone", "Recommended Offer", "Best Call Time", "Priority", "Lead Score", "Opportunity Score"];
-    const rows = list.map((d) => [d.p.name, d.p.phone, d.intel.offer.name, d.cw.window, d.priority.label, d.score, d.intel.opp.score].map((v) => JSON.stringify(v ?? "")).join(","));
+    const headers = ["Business Name", "Phone", "Fit", "Best Call Time", "Priority", "Lead Score", "Opportunity Score"];
+    const rows = list.map((d) => [d.p.name, d.p.phone, d.intel.fit.level, d.cw.window, d.priority.label, d.score, d.intel.opp.score].map((v) => JSON.stringify(v ?? "")).join(","));
     download("call-sheet.csv", [headers.join(","), ...rows].join("\n"));
   }
 
@@ -167,7 +168,7 @@ export default function Home() {
         <header className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Jackson Ascent <span className="text-blue-700">Intelligence</span></h1>
-            <p className="text-sm text-gray-500">Know who to call, when, what to pitch, and how to close.</p>
+            <p className="text-sm text-gray-500">Growth Systems for roofing companies — who to call, when, and how to pitch.</p>
           </div>
           <Link href="/calling" className="bg-blue-700 hover:bg-blue-800 text-white rounded-lg px-4 py-2 text-sm font-medium shadow-sm">☎️ Appointment Setter</Link>
         </header>
@@ -210,7 +211,7 @@ export default function Home() {
               {queue.map((d, i) => (
                 <li key={d.p.id} className="flex items-center justify-between py-2 text-sm">
                   <span className="flex items-center gap-2"><span className="text-gray-400 w-5">{i + 1}.</span><button className="text-blue-700 font-medium hover:underline" onClick={() => openDetail(d.p)}>{d.p.name}</button><span className={`text-xs rounded px-1.5 py-0.5 ${OPP_CLASS[d.intel.opp.category]}`}>Opp {d.intel.opp.score}</span></span>
-                  <span className="text-gray-600 whitespace-nowrap text-xs sm:text-sm">{d.intel.offer.name} · {d.cw.window} · {d.p.phone || "no phone"}</span>
+                  <span className="text-gray-600 whitespace-nowrap text-xs sm:text-sm">{d.intel.fit.level} · {d.cw.window} · {d.p.phone || "no phone"}</span>
                 </li>
               ))}
             </ol>
@@ -221,14 +222,14 @@ export default function Home() {
 
         <div className="overflow-x-auto bg-white border border-gray-200 rounded-xl shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-gray-500"><tr><th className="px-4 py-2.5 font-medium">Business</th><th className="px-4 py-2.5 font-medium">Lead Score</th><th className="px-4 py-2.5 font-medium">Priority</th><th className="px-4 py-2.5 font-medium">Recommended Offer</th><th className="px-4 py-2.5 font-medium">Best Call Window</th><th className="px-4 py-2.5 font-medium">Stage</th></tr></thead>
+            <thead className="bg-gray-50 text-left text-gray-500"><tr><th className="px-4 py-2.5 font-medium">Business</th><th className="px-4 py-2.5 font-medium">Lead Score</th><th className="px-4 py-2.5 font-medium">Priority</th><th className="px-4 py-2.5 font-medium">Fit</th><th className="px-4 py-2.5 font-medium">Best Call Window</th><th className="px-4 py-2.5 font-medium">Stage</th></tr></thead>
             <tbody className="divide-y divide-gray-100">
               {visible.map((d) => (
                 <tr key={d.p.id} className="hover:bg-blue-50/40">
                   <td className="px-4 py-2.5"><button onClick={() => openDetail(d.p)} className="text-left"><span className="font-medium text-blue-700 hover:underline">{d.p.name}</span><span className="block text-xs text-gray-400">{d.p.city}{d.p.state ? `, ${d.p.state}` : ""}</span></button></td>
                   <td className="px-4 py-2.5"><span className={`inline-block rounded-md px-2 py-0.5 font-semibold ${SCORE_CLASS[d.color]}`}>{d.score}</span></td>
                   <td className="px-4 py-2.5 whitespace-nowrap">{d.priority.emoji} {d.priority.label}</td>
-                  <td className="px-4 py-2.5"><span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${OFFER_CLASS[d.intel.offer.name]}`}>{d.intel.offer.name}</span></td>
+                  <td className="px-4 py-2.5"><span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${FIT_CLASS[d.intel.fit.level]}`}>{d.intel.fit.level}</span></td>
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{d.cw.window}</td>
                   <td className="px-4 py-2.5"><select value={d.p.pipeline_stage || "New Lead"} onChange={(e) => updateStage(d.p.id, e.target.value)} className="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white">{STAGES.map((s) => <option key={s} value={s}>{s}</option>)}</select></td>
                 </tr>
@@ -246,6 +247,7 @@ export default function Home() {
             <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
               <span className={`rounded-md px-2 py-0.5 font-semibold ${SCORE_CLASS[sd.color]}`}>Lead {sd.score}</span>
               <span className={`rounded-md px-2 py-0.5 font-semibold ${OPP_CLASS[sd.intel.opp.category]}`}>Opportunity {sd.intel.opp.score} ({sd.intel.opp.category})</span>
+              <span className={`rounded-md px-2 py-0.5 font-semibold ${FIT_CLASS[sd.intel.fit.level]}`}>{sd.intel.fit.level}</span>
               <span className="text-gray-600">Roofing {sd.confidence}%</span>
             </div>
 
@@ -267,9 +269,11 @@ export default function Home() {
             </div>
 
             <div className="border border-blue-200 rounded-lg p-3 mb-3 bg-blue-50 text-sm">
-              <div className="font-semibold text-blue-900">Recommended Offer: {sd.intel.offer.name}</div>
-              <div className="flex gap-4 mt-1"><span>Setup: <b>${sd.intel.offer.setup.toLocaleString()}</b></span><span>Monthly: <b>${sd.intel.offer.monthly.toLocaleString()}</b></span></div>
-              <div className="text-xs text-gray-700 mt-1">Why: {sd.intel.offer.why}</div>
+              <div className="font-semibold text-blue-900">Offer: {sd.intel.offer.name}</div>
+              <div className="mt-1">Standard: <b>${sd.intel.offer.setup.toLocaleString()}</b> setup + <b>${sd.intel.offer.monthly.toLocaleString()}</b>/mo</div>
+              <div>Founding Client (first 3): <b>${sd.intel.offer.fcoFirstMonth.toLocaleString()}</b> first month, then <b>${sd.intel.offer.monthly.toLocaleString()}</b>/mo</div>
+              <div className="text-xs text-gray-500">Ad spend billed separately.</div>
+              <div className="mt-1"><span className="font-medium">{sd.intel.fit.level}</span> — {sd.intel.fit.reason}</div>
               <div className="mt-1">Estimated ROI: <span className="font-semibold text-green-700">{sd.intel.roi.display}</span></div>
             </div>
 
