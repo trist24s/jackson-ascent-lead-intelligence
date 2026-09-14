@@ -5,11 +5,17 @@ import Link from "next/link";
 import { leadScore, scoreColor, contactPriority, decisionMakerProbability } from "@/lib/scoring";
 import { callWindow, hoursIntel, formatHours, type OpeningHour } from "@/lib/hours";
 import { roofingConfidence } from "@/lib/qualify";
-import { salesIntel } from "@/lib/sales";
+import { salesIntel, adLibraryUrl } from "@/lib/sales";
 
 const STAGES = ["New Lead", "Researched", "Qualified", "Contacted", "Follow Up", "Interested", "Discovery Call", "Proposal Sent", "Won", "Lost"];
 const ACTIVE = new Set(["Contacted", "Follow Up", "Interested", "Discovery Call", "Proposal Sent"]);
 function stageIndex(s: string | null): number { const i = STAGES.indexOf(s || "New Lead"); return i < 0 ? 0 : i; }
+function fiveStarPct(dist: any): number | null {
+  if (!dist) return null;
+  const t = (dist.oneStar || 0) + (dist.twoStar || 0) + (dist.threeStar || 0) + (dist.fourStar || 0) + (dist.fiveStar || 0);
+  if (!t) return null;
+  return Math.round(((dist.fiveStar || 0) / t) * 100);
+}
 
 type Prospect = {
   id: string; name: string; industry: string | null; phone: string | null; email: string | null;
@@ -20,6 +26,9 @@ type Prospect = {
   roofing_confidence: number | null; owner_name: string | null;
   linkedin_url: string | null; facebook_url: string | null; google_profile_url: string | null;
   scrape_run_id: string | null;
+  reviews_distribution: any; images_count: number | null; permanently_closed: boolean | null;
+  temporarily_closed: boolean | null; latest_review_at: string | null;
+  ads_score: number | null; ads_running: boolean | null; ads_notes: string | null;
 };
 type Note = { id: string; prospect_id: string; body: string; created_at: string };
 type Debug = { city?: string; returned?: number; qualified?: number; rejected?: number; inserted?: number; updated?: number; errors?: number; error_sample?: string; sample?: any[] };
@@ -29,6 +38,7 @@ const SCORE_CLASS: Record<string, string> = { green: "bg-green-100 text-green-80
 const OPP_CLASS: Record<string, string> = { High: "bg-green-100 text-green-800", Medium: "bg-amber-100 text-amber-800", Low: "bg-gray-100 text-gray-600" };
 const FIT_CLASS: Record<string, string> = { "Strong Fit": "bg-green-100 text-green-800", "Possible Fit": "bg-amber-100 text-amber-800", "Weak Fit": "bg-gray-100 text-gray-600" };
 const STATUS_LABEL: Record<string, string> = { open: "🟢 Open Now", closed: "🔴 Closed", closing_soon: "🟡 Closing Soon", unknown: "—" };
+function adsClass(s: number | null): string { if (s == null) return "bg-gray-100 text-gray-400"; if (s >= 7) return "bg-green-100 text-green-800"; if (s >= 4) return "bg-amber-100 text-amber-800"; return "bg-red-100 text-red-700"; }
 
 export default function Home() {
   const [industry, setIndustry] = useState("roofing");
@@ -65,7 +75,8 @@ export default function Home() {
     });
   }, [prospects]);
 
-  const qualified = useMemo(() => derived.filter((d) => d.confidence > 70), [derived]);
+  // Qualified = confident roofing AND not permanently closed.
+  const qualified = useMemo(() => derived.filter((d) => d.confidence > 70 && !d.p.permanently_closed), [derived]);
   const cities = useMemo(() => Array.from(new Set(prospects.map((p) => p.city).filter((c): c is string => !!c))).sort(), [prospects]);
 
   const visible = useMemo(() => {
@@ -81,13 +92,11 @@ export default function Home() {
     const appts = visible.filter((d) => stageIndex(d.p.pipeline_stage) >= stageIndex("Discovery Call")).length;
     const discovery = visible.filter((d) => d.p.pipeline_stage === "Discovery Call").length;
     const won = visible.filter((d) => d.p.pipeline_stage === "Won").length;
-    // Pipeline value = setup + 12 months across active deals (single Growth System offer).
     const pipelineValue = visible.filter((d) => ACTIVE.has(d.p.pipeline_stage || "")).reduce((s, d) => s + d.intel.offer.setup + d.intel.offer.monthly * 12, 0);
     const conversion = total ? `${((won / total) * 100).toFixed(1)}%` : "0%";
     return { total, high, callsMade, appts, discovery, won, pipelineValue, conversion };
   }, [visible]);
 
-  // Today's call list: opportunity, then decision-maker probability, then lead score.
   const queue = useMemo(() => {
     return [...visible].sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || (b.dm - a.dm) || (b.score - a.score)).slice(0, 10);
   }, [visible]);
@@ -123,6 +132,13 @@ export default function Home() {
     catch (e) { console.error("stage update failed", e); }
   }
 
+  async function updateAds(id: string, patch: Partial<Prospect>) {
+    setProspects((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    if (selected?.id === id) setSelected({ ...selected, ...patch } as Prospect);
+    try { await fetch(`/api/prospects/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }); }
+    catch (e) { console.error("ads update failed", e); }
+  }
+
   async function openDetail(p: Prospect) {
     setSelected(p); setNotes([]); setNoteText("");
     try { const res = await fetch(`/api/notes?prospect_id=${p.id}`, { cache: "no-store" }); if (res.ok) setNotes(await res.json()); } catch (e) { console.error(e); }
@@ -140,20 +156,21 @@ export default function Home() {
     if (!visible.length) return;
     let byP: Record<string, string> = {};
     try { const res = await fetch("/api/notes", { cache: "no-store" }); if (res.ok) { const all: Note[] = await res.json(); for (const n of all) byP[n.prospect_id] = byP[n.prospect_id] ? `${byP[n.prospect_id]} || ${n.body}` : n.body; } } catch (e) { /* */ }
-    const headers = ["name", "phone", "email", "website", "city", "state", "rating", "review_count", "roofing_confidence", "lead_score", "opportunity_score", "fit", "priority", "recommended", "standard_setup", "standard_monthly", "fco_first_month", "est_monthly_roi", "best_call_window", "pipeline_stage", "notes"];
-    const rows = visible.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.city, d.p.state, d.p.rating, d.p.review_count, d.confidence, d.score, d.intel.opp.score, d.intel.fit.level, d.priority.label, d.intel.offer.name, d.intel.offer.setup, d.intel.offer.monthly, d.intel.offer.fcoFirstMonth, d.intel.roi.amount, d.cw.window, d.p.pipeline_stage || "New Lead", byP[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
+    const headers = ["name", "phone", "email", "website", "city", "state", "rating", "review_count", "five_star_pct", "images", "last_review", "roofing_confidence", "lead_score", "opportunity_score", "fit", "ads_score", "ads_running", "priority", "recommended", "standard_setup", "standard_monthly", "fco_first_month", "est_monthly_roi", "best_call_window", "pipeline_stage", "notes"];
+    const rows = visible.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.city, d.p.state, d.p.rating, d.p.review_count, fiveStarPct(d.p.reviews_distribution), d.p.images_count, d.p.latest_review_at, d.confidence, d.score, d.intel.opp.score, d.intel.fit.level, d.p.ads_score, d.p.ads_running, d.priority.label, d.intel.offer.name, d.intel.offer.setup, d.intel.offer.monthly, d.intel.offer.fcoFirstMonth, d.intel.roi.amount, d.cw.window, d.p.pipeline_stage || "New Lead", byP[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
     download("jackson-ascent-leads.csv", [headers.join(","), ...rows].join("\n"));
   }
   function exportCallSheet() {
     if (!visible.length) return;
     const list = [...queue];
-    const headers = ["Business Name", "Phone", "Fit", "Best Call Time", "Priority", "Lead Score", "Opportunity Score"];
-    const rows = list.map((d) => [d.p.name, d.p.phone, d.intel.fit.level, d.cw.window, d.priority.label, d.score, d.intel.opp.score].map((v) => JSON.stringify(v ?? "")).join(","));
+    const headers = ["Business Name", "Phone", "Fit", "Ads /10", "Best Call Time", "Priority", "Lead Score", "Opportunity Score"];
+    const rows = list.map((d) => [d.p.name, d.p.phone, d.intel.fit.level, d.p.ads_score, d.cw.window, d.priority.label, d.score, d.intel.opp.score].map((v) => JSON.stringify(v ?? "")).join(","));
     download("call-sheet.csv", [headers.join(","), ...rows].join("\n"));
   }
 
   const sd = selected ? derived.find((d) => d.p.id === selected.id) : null;
   const heading = viewMode === "current" ? (lastSearch ? `Current Search: ${lastSearch.city}` : "Current Search") : (cityFilter === "All Cities" ? "All Saved Leads" : `Leads in ${cityFilter}`);
+  const recentReview = selected?.latest_review_at ? (Date.now() - new Date(selected.latest_review_at).getTime()) < 120 * 86400000 : false;
 
   const KPIS = [
     { label: "Total Leads", value: metrics.total }, { label: "High Priority", value: metrics.high },
@@ -222,19 +239,20 @@ export default function Home() {
 
         <div className="overflow-x-auto bg-white border border-gray-200 rounded-xl shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-gray-500"><tr><th className="px-4 py-2.5 font-medium">Business</th><th className="px-4 py-2.5 font-medium">Lead Score</th><th className="px-4 py-2.5 font-medium">Priority</th><th className="px-4 py-2.5 font-medium">Fit</th><th className="px-4 py-2.5 font-medium">Best Call Window</th><th className="px-4 py-2.5 font-medium">Stage</th></tr></thead>
+            <thead className="bg-gray-50 text-left text-gray-500"><tr><th className="px-4 py-2.5 font-medium">Business</th><th className="px-4 py-2.5 font-medium">Lead</th><th className="px-4 py-2.5 font-medium">Ads /10</th><th className="px-4 py-2.5 font-medium">Priority</th><th className="px-4 py-2.5 font-medium">Fit</th><th className="px-4 py-2.5 font-medium">Best Call Window</th><th className="px-4 py-2.5 font-medium">Stage</th></tr></thead>
             <tbody className="divide-y divide-gray-100">
               {visible.map((d) => (
                 <tr key={d.p.id} className="hover:bg-blue-50/40">
                   <td className="px-4 py-2.5"><button onClick={() => openDetail(d.p)} className="text-left"><span className="font-medium text-blue-700 hover:underline">{d.p.name}</span><span className="block text-xs text-gray-400">{d.p.city}{d.p.state ? `, ${d.p.state}` : ""}</span></button></td>
                   <td className="px-4 py-2.5"><span className={`inline-block rounded-md px-2 py-0.5 font-semibold ${SCORE_CLASS[d.color]}`}>{d.score}</span></td>
+                  <td className="px-4 py-2.5"><span className={`inline-block rounded-md px-2 py-0.5 font-semibold ${adsClass(d.p.ads_score)}`}>{d.p.ads_score ?? "—"}</span>{d.p.ads_running ? <span className="ml-1 text-xs text-green-600">live</span> : null}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">{d.priority.emoji} {d.priority.label}</td>
                   <td className="px-4 py-2.5"><span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${FIT_CLASS[d.intel.fit.level]}`}>{d.intel.fit.level}</span></td>
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{d.cw.window}</td>
                   <td className="px-4 py-2.5"><select value={d.p.pipeline_stage || "New Lead"} onChange={(e) => updateStage(d.p.id, e.target.value)} className="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white">{STAGES.map((s) => <option key={s} value={s}>{s}</option>)}</select></td>
                 </tr>
               ))}
-              {!visible.length && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">{viewMode === "current" && !lastSearch ? "Run a scrape to see current results, or switch to Database." : "No leads in this view."}</td></tr>}
+              {!visible.length && <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">{viewMode === "current" && !lastSearch ? "Run a scrape to see current results, or switch to Database." : "No leads in this view."}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -260,12 +278,35 @@ export default function Home() {
             </div>
 
             <div className="border border-gray-200 rounded-lg p-3 mb-3 bg-gray-50 text-sm">
+              <div className="font-semibold mb-1">Google Signals</div>
+              <div>5-star share: {fiveStarPct(selected.reviews_distribution) ?? "—"}%{fiveStarPct(selected.reviews_distribution) != null ? "" : ""}</div>
+              <div>Photos on profile: {selected.images_count ?? "—"}</div>
+              <div>Last review: {selected.latest_review_at ? new Date(selected.latest_review_at).toLocaleDateString() : "—"} {recentReview ? <span className="text-green-600">(active)</span> : null}</div>
+              {selected.temporarily_closed ? <div className="text-amber-600">Temporarily closed</div> : null}
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-3 mb-3 bg-gray-50 text-sm">
               <div className="font-semibold mb-1">Call Intelligence</div>
               <div>Status: {STATUS_LABEL[sd.hi.status]}{sd.hi.closesAt ? ` · closes ${sd.hi.closesAt}` : ""}{!sd.hi.openNow && sd.hi.opensNext ? ` · opens ${sd.hi.opensNext}` : ""}</div>
               <div className="mt-1">Best Call Window: <span className="font-medium">{sd.cw.window}</span></div>
               {sd.cw.reason && <div className="text-xs text-gray-500">{sd.cw.reason}</div>}
               <div className="text-xs text-gray-500 mt-1">Hours: {formatHours(selected.business_hours)}</div>
               <div className="mt-1">Decision-Maker Probability: <span className="font-medium">{sd.dm}%</span></div>
+            </div>
+
+            <div className="border border-purple-200 rounded-lg p-3 mb-3 bg-purple-50 text-sm">
+              <div className="font-semibold mb-1">Meta Ads (their advertising)</div>
+              <a href={adLibraryUrl(selected.name, selected.state)} target="_blank" rel="noreferrer" className="text-blue-600 underline">Check Meta Ad Library →</a>
+              <div className="flex items-center gap-4 mt-2">
+                <label className="flex items-center gap-1"><input type="checkbox" checked={!!selected.ads_running} onChange={(e) => updateAds(selected.id, { ads_running: e.target.checked })} /> Running ads</label>
+                <label className="flex items-center gap-1">Ads score:
+                  <select value={selected.ads_score ?? ""} onChange={(e) => updateAds(selected.id, { ads_score: e.target.value === "" ? null : Number(e.target.value) })} className="border border-gray-300 rounded px-1 py-0.5">
+                    <option value="">—</option>
+                    {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>/10
+                </label>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">Open the Ad Library, glance at their ads, then rate them 0–10. Weak/no ads = bigger opening for you.</div>
             </div>
 
             <div className="border border-blue-200 rounded-lg p-3 mb-3 bg-blue-50 text-sm">
