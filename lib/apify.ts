@@ -25,7 +25,9 @@ export function buildRunInput(niche: string, city: string, cap: number) {
     includeHistogram: false,
     includeOpeningHours: true,
     includePeopleAlsoSearch: false,
-    maxReviews: 0,
+    // Pull a few newest reviews to gauge how recently the business is getting reviews.
+    maxReviews: 3,
+    reviewsSort: "newest",
     maxImages: 0,
     maxQuestions: 0,
   };
@@ -61,10 +63,11 @@ export async function getApifyDataset(datasetId: string): Promise<Response> {
 type RunContext = { id?: string | null; industry?: string | null; niche?: string | null; city?: string | null };
 
 // Maps one Apify place item to scrape-owned Prospect columns.
-// Returns ONLY scrape-sourced fields — never pipeline_stage, qualified, scores, or notes.
+// Returns ONLY scrape-sourced fields — never pipeline_stage, qualified, scores, notes, or ads_* (those are human/CRM owned).
 export function mapItem(item: any, run: RunContext) {
   const category = item.categoryName ?? (Array.isArray(item.categories) ? item.categories[0] : null) ?? null;
   const industry = run.industry || run.niche || "roofing";
+  const latestReview = Array.isArray(item.reviews) && item.reviews[0]?.publishedAtDate ? item.reviews[0].publishedAtDate : null;
   return {
     place_id: item.placeId,
     name: item.title,
@@ -89,6 +92,12 @@ export function mapItem(item: any, run: RunContext) {
     linkedin_url: null,
     facebook_url: null,
     scrape_run_id: run.id ?? null,
+    // Google enrichment
+    reviews_distribution: item.reviewsDistribution ?? null,
+    images_count: typeof item.imagesCount === "number" ? item.imagesCount : null,
+    permanently_closed: !!item.permanentlyClosed,
+    temporarily_closed: !!item.temporarilyClosed,
+    latest_review_at: latestReview,
     scraped_at: new Date().toISOString(),
   };
 }
