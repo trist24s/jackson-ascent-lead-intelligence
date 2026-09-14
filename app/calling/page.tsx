@@ -8,7 +8,7 @@ import { roofingConfidence } from "@/lib/qualify";
 import { salesIntel } from "@/lib/sales";
 
 const STATUS_LABEL: Record<string, string> = { open: "🟢 Open Now", closed: "🔴 Closed", closing_soon: "🟡 Closing Soon", unknown: "—" };
-const OPP_CLASS: Record<string, string> = { High: "bg-green-100 text-green-800", Medium: "bg-amber-100 text-amber-800", Low: "bg-gray-100 text-gray-600" };
+const FIT_CLASS: Record<string, string> = { "Strong Fit": "bg-green-100 text-green-800", "Possible Fit": "bg-amber-100 text-amber-800", "Weak Fit": "bg-gray-100 text-gray-600" };
 
 type Prospect = {
   id: string; name: string; industry: string | null; phone: string | null; email: string | null;
@@ -87,7 +87,7 @@ export default function Calling() {
 
         {current && (
           <div>
-            <div className="text-xs text-gray-400 mb-2">Lead {idx + 1} of {queue.length} · {current.priority.emoji} {current.priority.label} · <span className={`rounded px-1.5 py-0.5 ${OPP_CLASS[current.intel.opp.category]}`}>Opportunity {current.intel.opp.score}</span></div>
+            <div className="text-xs text-gray-400 mb-2">Lead {idx + 1} of {queue.length} · {current.priority.emoji} {current.priority.label} · <span className={`rounded px-1.5 py-0.5 ${FIT_CLASS[current.intel.fit.level]}`}>{current.intel.fit.level}</span></div>
 
             <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
               <h2 className="text-2xl font-bold text-gray-900">{current.p.name}</h2>
@@ -99,8 +99,9 @@ export default function Calling() {
 
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 text-sm">
               <div className="font-semibold text-blue-900">Pitch: {current.intel.offer.name}</div>
-              <div className="flex gap-4 mt-1"><span>Setup: <b>${current.intel.offer.setup.toLocaleString()}</b></span><span>Monthly: <b>${current.intel.offer.monthly.toLocaleString()}</b></span><span>ROI: <b className="text-green-700">{current.intel.roi.display}</b></span></div>
-              <div className="text-xs text-gray-700 mt-1">Why: {current.intel.offer.why}</div>
+              <div className="mt-1">Standard: <b>${current.intel.offer.setup.toLocaleString()}</b> setup + <b>${current.intel.offer.monthly.toLocaleString()}</b>/mo</div>
+              <div>Founding Client (first 3): <b>${current.intel.offer.fcoFirstMonth.toLocaleString()}</b> first month, then <b>${current.intel.offer.monthly.toLocaleString()}</b>/mo · <span className="text-gray-600">ad spend separate</span></div>
+              <div className="mt-1">ROI: <b className="text-green-700">{current.intel.roi.display}</b></div>
               <div className="mt-2"><span className="text-gray-500">Angle:</span> {current.intel.angle}</div>
               <div className="mt-1"><span className="text-gray-500">Likely objection:</span> “{current.intel.objection}”</div>
               <div className="mt-1"><span className="text-gray-500">Your response:</span> {current.intel.response}</div>
