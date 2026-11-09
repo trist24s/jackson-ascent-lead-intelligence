@@ -11,6 +11,8 @@ export type ScoreInput = {
   email?: string | null;
   category?: string | null;
   industry?: string | null;
+  ads_running?: boolean | null;
+  ads_score?: number | null;
 };
 
 export function leadScore(p: ScoreInput): { score: number; reasons: string[] } {
@@ -68,13 +70,16 @@ export function recommendService(p: ScoreInput): { service: string; reason: stri
 export type Priority = { level: "immediate" | "high" | "medium" | "low"; label: string; emoji: string };
 
 export function contactPriority(p: ScoreInput): Priority {
+  // Missed-Call Recovery model: priority = real call volume + ability to pay $1,500/mo.
+  // (The old "big business with no website" rule was for selling marketing — removed.)
   const { score } = leadScore(p);
   const rc = p.review_count ?? 0;
-  const hasWeb = !!(p.has_website || p.website);
+  const r = p.rating ?? 0;
   const bigBusiness = rc >= 50;
-  const missingMarketing = !hasWeb;
+  const payingForLeads = !!p.ads_running || (p.ads_score ?? 0) >= 5;
 
-  if (bigBusiness && missingMarketing) return { level: "immediate", label: "Contact Immediately", emoji: "🔥" };
+  if (bigBusiness && r >= 4.0 && payingForLeads) return { level: "immediate", label: "Contact Immediately", emoji: "🔥" };
+  if (rc < 20) return { level: "low", label: "Low", emoji: "📋" }; // likely too small for $1,500/mo
   if (score >= 80 || (bigBusiness && score >= 60)) return { level: "high", label: "High", emoji: "⭐" };
   if (score >= 55) return { level: "medium", label: "Medium", emoji: "📞" };
   return { level: "low", label: "Low", emoji: "📋" };

@@ -49,6 +49,10 @@ export function opportunityScore(p: SalesInput): { score: number; category: "Low
   s += Math.round(((p.roofing_confidence ?? 0) / 100) * 15);
   if (hasHours(p)) s += 5;
   if (r >= 4.5 && rc >= 50) s += 10; else if (r >= 4.2 && rc >= 30) s += 5;
+  // Paying for ads = paying for calls they can't afford to miss.
+  if (p.ads_running || (p.ads_score ?? 0) >= 5) s += 10;
+  // Already open 24 hours = probably already answering; weaker fit.
+  if (Array.isArray(p.business_hours) && (p.business_hours as { hours?: string }[]).some((h) => /24\s*hours|open 24/i.test(h?.hours || ""))) s -= 10;
 
   const score = Math.max(0, Math.min(100, s));
   const category = score >= 70 ? "High" : score >= 40 ? "Medium" : "Low";
@@ -66,6 +70,9 @@ export function fitAssessment(p: SalesInput): Fit {
   const opp = opportunityScore(p).score;
   const rc = p.review_count ?? 0;
   const r = p.rating ?? 0;
+  if (rc < 20) {
+    return { level: "Weak Fit", reason: "Under 20 reviews — probably not enough call volume to justify $1,500/mo yet." };
+  }
   if (opp >= 60 && rc >= 40 && r >= 3.8) {
     return { level: "Strong Fit", reason: "Established roofer with real call volume — exactly who loses the most to missed calls, and who recovers the cost the fastest (one saved roof job more than covers the month)." };
   }
