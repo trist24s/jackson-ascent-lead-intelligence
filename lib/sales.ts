@@ -13,7 +13,7 @@ export type SalesInput = ScoreInput & {
 
 type NamedInput = SalesInput & { name?: string | null };
 // Not clearly a roofer (remodelers, cleaning/restoration, GCs) -> weaker fit.
-function notRoofer(p: NamedInput): boolean { return !!p.name && !/roof/i.test(p.name); }
+function notRoofer(p: NamedInput): boolean { return !!p.name && !/roof|shingle/i.test(p.name); }
 // Commercial-only roofers deal with property managers, not homeowners calling in.
 function commercialOnly(p: NamedInput): boolean { return !!p.name && /commercial/i.test(p.name); }
 
