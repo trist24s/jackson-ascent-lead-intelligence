@@ -98,7 +98,7 @@ export default function Home() {
   }, [visible]);
 
   const queue = useMemo(() => {
-    return [...visible].sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || ((b.p.review_count ?? 0) - (a.p.review_count ?? 0)) || (b.dm - a.dm)).slice(0, 10);
+    return visible.filter((d) => d.p.pipeline_stage !== "Won" && d.p.pipeline_stage !== "Lost").sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || ((b.p.review_count ?? 0) - (a.p.review_count ?? 0)) || (b.dm - a.dm)).slice(0, 10);
   }, [visible]);
 
   async function runScrape(e: React.FormEvent) {

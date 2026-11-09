@@ -109,10 +109,11 @@ export default function Calling() {
               <div className="mt-1"><span className="text-gray-500">Your response:</span> {current.intel.response}</div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-3">
               <button disabled={working} onClick={() => act("Contacted")} className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50">Contacted</button>
               <button disabled={working} onClick={() => act("Contacted", "Left voicemail")} className="bg-gray-600 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50">Voicemail</button>
               <button disabled={working} onClick={() => act("Lost", "Not interested")} className="bg-red-600 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50">Not Interested</button>
+              <button disabled={working} onClick={() => act("Lost", "Already has a missed-call / AI answering system")} className="bg-red-900 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50">Has System</button>
               <button disabled={working} onClick={() => act("Follow Up")} className="bg-amber-500 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50">Follow Up</button>
               <button disabled={working} onClick={() => act("Discovery Call", "Booked discovery call")} className="bg-green-600 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50">Booked Call</button>
             </div>
