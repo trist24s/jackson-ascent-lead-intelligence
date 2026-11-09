@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { leadScore, scoreColor, contactPriority, decisionMakerProbability } from "@/lib/scoring";
+import { leadScore, scoreColor, decisionMakerProbability } from "@/lib/scoring";
 import { callWindow, hoursIntel, formatHours, type OpeningHour } from "@/lib/hours";
 import { roofingConfidence } from "@/lib/qualify";
-import { salesIntel, adLibraryUrl } from "@/lib/sales";
+import { salesIntel, adLibraryUrl, missedCallPriority } from "@/lib/sales";
 
 const STAGES = ["New Lead", "Researched", "Qualified", "Contacted", "Follow Up", "Interested", "Discovery Call", "Proposal Sent", "Won", "Lost"];
 const ACTIVE = new Set(["Contacted", "Follow Up", "Interested", "Discovery Call", "Proposal Sent"]);
@@ -69,7 +69,7 @@ export default function Home() {
       const ls = leadScore(input).score;
       return {
         p, confidence: conf, score: ls, color: scoreColor(ls),
-        priority: contactPriority(input), dm: decisionMakerProbability(input), intel: salesIntel(input),
+        priority: missedCallPriority(input), dm: decisionMakerProbability(input), intel: salesIntel(input),
         cw: callWindow(p.business_hours, now), hi: hoursIntel(p.business_hours, now),
       };
     });
@@ -98,7 +98,7 @@ export default function Home() {
   }, [visible]);
 
   const queue = useMemo(() => {
-    return [...visible].sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || (b.dm - a.dm) || (b.score - a.score)).slice(0, 10);
+    return [...visible].sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || ((b.p.review_count ?? 0) - (a.p.review_count ?? 0)) || (b.dm - a.dm)).slice(0, 10);
   }, [visible]);
 
   async function runScrape(e: React.FormEvent) {

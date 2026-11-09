@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { leadScore, contactPriority, decisionMakerProbability } from "@/lib/scoring";
+import { leadScore, decisionMakerProbability } from "@/lib/scoring";
 import { callWindow, hoursIntel, type OpeningHour } from "@/lib/hours";
 import { roofingConfidence } from "@/lib/qualify";
-import { salesIntel, adLibraryUrl } from "@/lib/sales";
+import { salesIntel, adLibraryUrl, missedCallPriority } from "@/lib/sales";
 
 const STATUS_LABEL: Record<string, string> = { open: "🟢 Open Now", closed: "🔴 Closed", closing_soon: "🟡 Closing Soon", unknown: "—" };
 const FIT_CLASS: Record<string, string> = { "Strong Fit": "bg-green-100 text-green-800", "Possible Fit": "bg-amber-100 text-amber-800", "Weak Fit": "bg-gray-100 text-gray-600" };
@@ -36,10 +36,10 @@ export default function Calling() {
       .map((p) => {
         const conf = p.roofing_confidence ?? roofingConfidence({ category: p.category, name: p.name, industry: p.industry || "roofing" });
         const input = { ...p, industry: p.industry || "roofing", roofing_confidence: conf };
-        return { p, conf, score: leadScore(input).score, priority: contactPriority(input), dm: decisionMakerProbability(input), intel: salesIntel(input) };
+        return { p, conf, score: leadScore(input).score, priority: missedCallPriority(input), dm: decisionMakerProbability(input), intel: salesIntel(input) };
       })
       .filter((d) => d.conf > 70 && !d.p.permanently_closed && d.p.pipeline_stage !== "Won" && d.p.pipeline_stage !== "Lost")
-      .sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || (b.dm - a.dm) || (b.score - a.score));
+      .sort((a, b) => (b.intel.opp.score - a.intel.opp.score) || ((b.p.review_count ?? 0) - (a.p.review_count ?? 0)) || (b.dm - a.dm));
   }, [prospects]);
 
   const current = queue[idx];

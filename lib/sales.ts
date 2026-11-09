@@ -4,12 +4,18 @@
 //   First month is paid upfront (before setup starts) and is non-refundable once
 //   setup begins. Month-to-month after that; cancel before the next billing date.
 
-import type { ScoreInput } from "./scoring";
+import type { ScoreInput, Priority } from "./scoring";
 
 export type SalesInput = ScoreInput & {
   roofing_confidence?: number | null;
   business_hours?: unknown;
 };
+
+type NamedInput = SalesInput & { name?: string | null };
+// Not clearly a roofer (remodelers, cleaning/restoration, GCs) -> weaker fit.
+function notRoofer(p: NamedInput): boolean { return !!p.name && !/roof/i.test(p.name); }
+// Commercial-only roofers deal with property managers, not homeowners calling in.
+function commercialOnly(p: NamedInput): boolean { return !!p.name && /commercial/i.test(p.name); }
 
 function hasHours(p: SalesInput): boolean {
   return Array.isArray(p.business_hours) && (p.business_hours as unknown[]).length > 0;
@@ -49,6 +55,8 @@ export function opportunityScore(p: SalesInput): { score: number; category: "Low
   s += Math.round(((p.roofing_confidence ?? 0) / 100) * 15);
   if (hasHours(p)) s += 5;
   if (r >= 4.5 && rc >= 50) s += 10; else if (r >= 4.2 && rc >= 30) s += 5;
+  if (notRoofer(p as NamedInput)) s -= 25;
+  if (commercialOnly(p as NamedInput)) s -= 20;
   // Paying for ads = paying for calls they can't afford to miss.
   if (p.ads_running || (p.ads_score ?? 0) >= 5) s += 10;
   // Already open 24 hours = probably already answering; weaker fit.
@@ -72,6 +80,12 @@ export function fitAssessment(p: SalesInput): Fit {
   const r = p.rating ?? 0;
   if (rc < 20) {
     return { level: "Weak Fit", reason: "Under 20 reviews — probably not enough call volume to justify $1,500/mo yet." };
+  }
+  if (notRoofer(p as NamedInput)) {
+    return { level: "Weak Fit", reason: "Name doesn't say roofing (remodeler / restoration / GC?) — confirm roofing is their main business before pitching." };
+  }
+  if (commercialOnly(p as NamedInput)) {
+    return { level: "Possible Fit", reason: "Commercial roofer — works with property managers more than homeowners calling in. Lower missed-call pain." };
   }
   if (opp >= 60 && rc >= 40 && r >= 3.8) {
     return { level: "Strong Fit", reason: "Established roofer with real call volume — exactly who loses the most to missed calls, and who recovers the cost the fastest (one saved roof job more than covers the month)." };
@@ -125,6 +139,20 @@ const RESPONSES: Record<string, string> = {
 
 export function suggestedResponse(p: SalesInput): string {
   return RESPONSES[objectionPrediction(p)] || RESPONSES["We already answer our own phones."];
+}
+
+// Call priority for the Missed-Call Recovery offer. Driven by fit + opportunity
+// (call volume, reputation, paying for ads) — NOT by website/email, which were
+// marketing-agency signals. A roofer with lots of reviews and no website gets most
+// of their work by phone, which makes them a GOOD fit, not a bad one.
+export function missedCallPriority(p: SalesInput): Priority {
+  const fit = fitAssessment(p).level;
+  const opp = opportunityScore(p).score;
+  const payingForLeads = !!p.ads_running || (p.ads_score ?? 0) >= 5;
+  if (fit === "Strong Fit" && payingForLeads) return { level: "immediate", label: "Contact Immediately", emoji: "🔥" };
+  if (fit === "Strong Fit") return { level: "high", label: "High", emoji: "⭐" };
+  if (fit === "Possible Fit" && opp >= 50) return { level: "medium", label: "Medium", emoji: "📞" };
+  return { level: "low", label: "Low", emoji: "📋" };
 }
 
 // Everything a salesperson needs for one lead.
