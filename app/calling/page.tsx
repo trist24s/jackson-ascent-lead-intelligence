@@ -100,8 +100,8 @@ export default function Calling() {
 
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 text-sm">
               <div className="font-semibold text-blue-900">Pitch: {current.intel.offer.name}</div>
-              <div className="mt-1">Standard: <b>${current.intel.offer.setup.toLocaleString()}</b> setup + <b>${current.intel.offer.monthly.toLocaleString()}</b>/mo</div>
-              <div>Founding Client (first 3): <b>${current.intel.offer.fcoFirstMonth.toLocaleString()}</b> first month, then <b>${current.intel.offer.monthly.toLocaleString()}</b>/mo · <span className="text-gray-600">ad spend separate</span></div>
+              <div className="mt-1"><b>${current.intel.offer.setup.toLocaleString()}</b> one-time setup + <b>${current.intel.offer.monthly.toLocaleString()}</b>/mo</div>
+              <div className="text-xs text-gray-500">Pays for itself by catching a single missed roofing lead.</div>
               <div className="mt-1">ROI: <b className="text-green-700">{current.intel.roi.display}</b></div>
               <div className="mt-2"><span className="text-gray-500">Angle:</span> {current.intel.angle}</div>
               <div className="mt-1"><span className="text-gray-500">Likely objection:</span> “{current.intel.objection}”</div>

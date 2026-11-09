@@ -156,8 +156,8 @@ export default function Home() {
     if (!visible.length) return;
     let byP: Record<string, string> = {};
     try { const res = await fetch("/api/notes", { cache: "no-store" }); if (res.ok) { const all: Note[] = await res.json(); for (const n of all) byP[n.prospect_id] = byP[n.prospect_id] ? `${byP[n.prospect_id]} || ${n.body}` : n.body; } } catch (e) { /* */ }
-    const headers = ["name", "phone", "email", "website", "city", "state", "rating", "review_count", "five_star_pct", "images", "last_review", "roofing_confidence", "lead_score", "opportunity_score", "fit", "ads_score", "ads_running", "priority", "recommended", "standard_setup", "standard_monthly", "fco_first_month", "est_monthly_roi", "best_call_window", "pipeline_stage", "notes"];
-    const rows = visible.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.city, d.p.state, d.p.rating, d.p.review_count, fiveStarPct(d.p.reviews_distribution), d.p.images_count, d.p.latest_review_at, d.confidence, d.score, d.intel.opp.score, d.intel.fit.level, d.p.ads_score, d.p.ads_running, d.priority.label, d.intel.offer.name, d.intel.offer.setup, d.intel.offer.monthly, d.intel.offer.fcoFirstMonth, d.intel.roi.amount, d.cw.window, d.p.pipeline_stage || "New Lead", byP[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
+    const headers = ["name", "phone", "email", "website", "city", "state", "rating", "review_count", "five_star_pct", "images", "last_review", "roofing_confidence", "lead_score", "opportunity_score", "fit", "ads_score", "ads_running", "priority", "offer", "setup", "monthly", "est_monthly_roi", "best_call_window", "pipeline_stage", "notes"];
+    const rows = visible.map((d) => [d.p.name, d.p.phone, d.p.email, d.p.website, d.p.city, d.p.state, d.p.rating, d.p.review_count, fiveStarPct(d.p.reviews_distribution), d.p.images_count, d.p.latest_review_at, d.confidence, d.score, d.intel.opp.score, d.intel.fit.level, d.p.ads_score, d.p.ads_running, d.priority.label, d.intel.offer.name, d.intel.offer.setup, d.intel.offer.monthly, d.intel.roi.amount, d.cw.window, d.p.pipeline_stage || "New Lead", byP[d.p.id] || ""].map((v) => JSON.stringify(v ?? "")).join(","));
     download("jackson-ascent-leads.csv", [headers.join(","), ...rows].join("\n"));
   }
   function exportCallSheet() {
@@ -185,7 +185,7 @@ export default function Home() {
         <header className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Jackson Ascent <span className="text-blue-700">Intelligence</span></h1>
-            <p className="text-sm text-gray-500">Growth Systems for roofing companies — who to call, when, and how to pitch.</p>
+            <p className="text-sm text-gray-500">Missed-call recovery for roofing contractors — who to call, when, and how to pitch.</p>
           </div>
           <Link href="/calling" className="bg-blue-700 hover:bg-blue-800 text-white rounded-lg px-4 py-2 text-sm font-medium shadow-sm">☎️ Appointment Setter</Link>
         </header>
@@ -279,7 +279,7 @@ export default function Home() {
 
             <div className="border border-gray-200 rounded-lg p-3 mb-3 bg-gray-50 text-sm">
               <div className="font-semibold mb-1">Google Signals</div>
-              <div>5-star share: {fiveStarPct(selected.reviews_distribution) ?? "—"}%{fiveStarPct(selected.reviews_distribution) != null ? "" : ""}</div>
+              <div>5-star share: {fiveStarPct(selected.reviews_distribution) ?? "—"}%</div>
               <div>Photos on profile: {selected.images_count ?? "—"}</div>
               <div>Last review: {selected.latest_review_at ? new Date(selected.latest_review_at).toLocaleDateString() : "—"} {recentReview ? <span className="text-green-600">(active)</span> : null}</div>
               {selected.temporarily_closed ? <div className="text-amber-600">Temporarily closed</div> : null}
@@ -306,14 +306,13 @@ export default function Home() {
                   </select>/10
                 </label>
               </div>
-              <div className="text-xs text-gray-500 mt-1">Open the Ad Library, glance at their ads, then rate them 0–10. Weak/no ads = bigger opening for you.</div>
+              <div className="text-xs text-gray-500 mt-1">Open the Ad Library, glance at their ads, then rate them 0–10. Paying for ads but missing calls = a strong opening for you.</div>
             </div>
 
             <div className="border border-blue-200 rounded-lg p-3 mb-3 bg-blue-50 text-sm">
               <div className="font-semibold text-blue-900">Offer: {sd.intel.offer.name}</div>
-              <div className="mt-1">Standard: <b>${sd.intel.offer.setup.toLocaleString()}</b> setup + <b>${sd.intel.offer.monthly.toLocaleString()}</b>/mo</div>
-              <div>Founding Client (first 3): <b>${sd.intel.offer.fcoFirstMonth.toLocaleString()}</b> first month, then <b>${sd.intel.offer.monthly.toLocaleString()}</b>/mo</div>
-              <div className="text-xs text-gray-500">Ad spend billed separately.</div>
+              <div className="mt-1"><b>${sd.intel.offer.setup.toLocaleString()}</b> one-time setup + <b>${sd.intel.offer.monthly.toLocaleString()}</b>/mo</div>
+              <div className="text-xs text-gray-500">Pays for itself by catching a single missed roofing lead.</div>
               <div className="mt-1"><span className="font-medium">{sd.intel.fit.level}</span> — {sd.intel.fit.reason}</div>
               <div className="mt-1">Estimated ROI: <span className="font-semibold text-green-700">{sd.intel.roi.display}</span></div>
             </div>
