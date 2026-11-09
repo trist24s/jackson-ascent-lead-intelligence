@@ -1,8 +1,8 @@
 // Jackson Ascent sales intelligence. Pure functions, no I/O — client/server safe.
-// Offer + pricing reflect the current model (Nov 2026):
-//   ONE offer — the Missed-Call Recovery System. Flat $1,500 one-time setup + $997/mo.
-//   No ad spend, no founding-client tier. It pays for itself by catching a single
-//   missed roofing lead.
+// Offer + pricing reflect the current model (Nov 9, 2026):
+//   ONE offer — the Missed-Call Recovery System. $1,500/mo, NO setup fee, no ad spend.
+//   First month is paid upfront (before setup starts) and is non-refundable once
+//   setup begins. Month-to-month after that; cancel before the next billing date.
 
 import type { ScoreInput } from "./scoring";
 
@@ -20,8 +20,10 @@ function hasHours(p: SalesInput): boolean {
 // ---------------------------------------------------------------------------
 export const OFFER = {
   name: "Missed-Call Recovery System",
-  setup: 1500,
-  monthly: 997,
+  setup: 0, // no setup fee — month 1 is collected upfront instead
+  monthly: 1500,
+  terms: "No setup fee · first month paid upfront · month-to-month",
+  pitch: "No setup fee, no ad spend, $1,500 a month, cancel anytime. If it doesn't catch at least one job's worth of calls, you walk.",
 };
 
 // One-click Meta Ad Library lookup for a business (free, public). Opens active ads
@@ -65,7 +67,7 @@ export function fitAssessment(p: SalesInput): Fit {
   const rc = p.review_count ?? 0;
   const r = p.rating ?? 0;
   if (opp >= 60 && rc >= 40 && r >= 3.8) {
-    return { level: "Strong Fit", reason: "Established roofer with real call volume — exactly who loses the most to missed calls, and who recovers the cost the fastest (one saved roof job covers months)." };
+    return { level: "Strong Fit", reason: "Established roofer with real call volume — exactly who loses the most to missed calls, and who recovers the cost the fastest (one saved roof job more than covers the month)." };
   }
   if (opp >= 40) {
     return { level: "Possible Fit", reason: "Some traction — confirm they're getting inbound calls they miss while out on jobs." };
@@ -110,8 +112,8 @@ export function objectionPrediction(p: SalesInput): string {
 const RESPONSES: Record<string, string> = {
   "We already answer our own phones.": "For sure — but when you're up on a roof or driving between jobs, those calls hit voicemail, and most homeowners just call the next roofer. This texts every missed call back within 30 seconds and books the inspection, so you keep the job you already earned.",
   "We already have someone handling that.": "Nice — this runs right alongside them. It covers the after-hours and overflow they can't catch, texts the homeowner back instantly, and drops the booked inspection on your calendar.",
-  "We're already busy — we don't need more leads.": "Totally — this isn't about more leads, it's about not losing the ones calling you right now. One recovered roof job a month pays for it many times over.",
-  "We've tried something like this before.": "Fair — most of those were one gadget, not the full catch-and-book loop. This answers the missed call, texts back in 30 seconds, qualifies them, and books the inspection automatically. Worst case, you finally see how many calls you've been missing.",
+  "We're already busy — we don't need more leads.": "Totally — this isn't about more leads, it's about not losing the ones calling you right now. One recovered roof job a month more than pays for it.",
+  "We've tried something like this before.": "Fair — most of those were one gadget, not the full catch-and-book loop. This answers the missed call, texts back in 30 seconds, qualifies them, and books the inspection automatically. No setup fee and it's month-to-month — worst case, you finally see how many calls you've been missing and cancel.",
 };
 
 export function suggestedResponse(p: SalesInput): string {

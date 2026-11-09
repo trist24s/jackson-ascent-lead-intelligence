@@ -92,7 +92,7 @@ export default function Home() {
     const appts = visible.filter((d) => stageIndex(d.p.pipeline_stage) >= stageIndex("Discovery Call")).length;
     const discovery = visible.filter((d) => d.p.pipeline_stage === "Discovery Call").length;
     const won = visible.filter((d) => d.p.pipeline_stage === "Won").length;
-    const pipelineValue = visible.filter((d) => ACTIVE.has(d.p.pipeline_stage || "")).reduce((s, d) => s + d.intel.offer.setup + d.intel.offer.monthly * 12, 0);
+    const pipelineValue = visible.filter((d) => ACTIVE.has(d.p.pipeline_stage || "")).reduce((s, d) => s + d.intel.offer.monthly * 12, 0);
     const conversion = total ? `${((won / total) * 100).toFixed(1)}%` : "0%";
     return { total, high, callsMade, appts, discovery, won, pipelineValue, conversion };
   }, [visible]);
@@ -311,8 +311,9 @@ export default function Home() {
 
             <div className="border border-blue-200 rounded-lg p-3 mb-3 bg-blue-50 text-sm">
               <div className="font-semibold text-blue-900">Offer: {sd.intel.offer.name}</div>
-              <div className="mt-1"><b>${sd.intel.offer.setup.toLocaleString()}</b> one-time setup + <b>${sd.intel.offer.monthly.toLocaleString()}</b>/mo</div>
-              <div className="text-xs text-gray-500">Pays for itself by catching a single missed roofing lead.</div>
+              <div className="mt-1"><b>${sd.intel.offer.monthly.toLocaleString()}</b>/mo · <b>no setup fee</b></div>
+              <div className="text-xs text-gray-500">{sd.intel.offer.terms}</div>
+              <div className="mt-1 italic text-blue-900">“{sd.intel.offer.pitch}”</div>
               <div className="mt-1"><span className="font-medium">{sd.intel.fit.level}</span> — {sd.intel.fit.reason}</div>
               <div className="mt-1">Estimated ROI: <span className="font-semibold text-green-700">{sd.intel.roi.display}</span></div>
             </div>
